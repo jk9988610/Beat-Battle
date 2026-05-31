@@ -26,6 +26,17 @@ import { isCloudEnabled, getCloudConfig, setCloudConfig, hasBuiltInCloudConfig }
 import { saveSession, clearSession, loadSession, MUSIC_PROD_URL } from './session.js';
 import { listPublishedWorks, createSubmissionFromPublished } from './published-works.js';
 import {
+  normalizeSeason,
+  formatSeasonProgressHtml,
+  getSeasonRules,
+  setDefaultSeasonRulesTemplate,
+} from './season-rules.js';
+import {
+  maybeAutoProgressSeason,
+  saveSeasonParticipant,
+  saveSeasonRules,
+} from './season-progress.js';
+import {
   cloudActive,
   initCloud,
   findOrCreateUser,
@@ -33,6 +44,8 @@ import {
   createReview,
   updateSeasonPhase,
   startNewSeason,
+  updateSeasonRulesRemote,
+  joinSeasonParticipantRemote,
   subscribeSeasonChanges,
   setCurrentUserId,
 } from './remote.js';
@@ -42,29 +55,71 @@ let audioObjectUrl = null;
 let reloadTimer = null;
 let uploadMode = 'library';
 let publishedWorksCache = [];
+let autoProgressTimer = null;
 
 const $ = (sel) => document.querySelector(sel);
+
+function normalizeAllSeasons() {
+  if (!state?.seasons) return;
+  for (const s of Object.values(state.seasons)) normalizeSeason(s);
+}
 
 function syncGlobalPhase() {
   const season = getCurrentSeason(state);
   state.phase = season.phase;
 }
 
-function persist() {
+function persistStateOnly() {
   syncGlobalPhase();
   saveState(state);
+}
+
+function persist() {
+  persistStateOnly();
   render();
+  scheduleAutoProgress();
 }
 
 async function reloadFromCloud() {
   if (!isCloudEnabled()) return;
   state = await loadState();
+  normalizeAllSeasons();
+  await runAutoProgress();
   render();
+  scheduleAutoProgress();
 }
 
 function scheduleCloudReload() {
   clearTimeout(reloadTimer);
   reloadTimer = setTimeout(() => reloadFromCloud(), 400);
+}
+
+async function runAutoProgress() {
+  if (!state) return { changed: false };
+  const season = getCurrentSeason(state);
+  normalizeSeason(season);
+  const result = await maybeAutoProgressSeason(state, { saveState: persistStateOnly });
+  if (result.changed) {
+    if (cloudActive()) await reloadFromCloud();
+    else persistStateOnly();
+    if (result.message) alert(result.message);
+  }
+  return result;
+}
+
+function scheduleAutoProgress(delayMs = 300) {
+  clearTimeout(autoProgressTimer);
+  autoProgressTimer = setTimeout(async () => {
+    try {
+      const result = await runAutoProgress();
+      if (result.changed) render();
+      const season = getCurrentSeason(state);
+      const rules = getSeasonRules(season);
+      if (rules.autoProgress) scheduleAutoProgress(season.phase === 'revealed' ? 5000 : 8000);
+    } catch (err) {
+      console.error('auto progress', err);
+    }
+  }, delayMs);
 }
 
 function currentUser() {
@@ -202,6 +257,31 @@ function renderSettings() {
   return renderSettingsPage(user, season, cloudHint, getSettingsTab());
 }
 
+async function bindSeasonRulesForm(rulesInput) {
+  try {
+    assertAdmin(currentUser());
+  } catch (e) {
+    alert(e.message);
+    return;
+  }
+  const rules = {
+    minParticipants: rulesInput.minParticipants,
+    minSubmissions: rulesInput.minSubmissions,
+    newSeasonDelaySec: rulesInput.newSeasonDelaySec,
+    autoProgress: rulesInput.autoProgress,
+  };
+  setDefaultSeasonRulesTemplate(rules);
+  await saveSeasonRules(state, rules, {
+    cloudActive,
+    updateSeasonRulesRemote,
+    saveState,
+  });
+  if (cloudActive()) await reloadFromCloud();
+  else persist();
+  alert('赛季规则已保存');
+  render();
+}
+
 function bindAdminActivityEvents() {
   $('#btn-set-phase')?.addEventListener('click', async () => {
     try {
@@ -315,6 +395,7 @@ function renderHome() {
       <span>第 <strong>${season.id}</strong> 赛季</span>
       <span class="phase-tag phase-${season.phase}">${phaseLabel(season.phase)}</span>
     </div>
+    ${(p => p ? `<div class="card season-progress-card">${p}</div>` : '')(formatSeasonProgressHtml(season))}
     ${
       !user
         ? `
@@ -654,6 +735,7 @@ function bindUploadPageEvents() {
       if (cloudActive()) {
         await createSubmission(state.currentSeasonId, user.id, file);
         await reloadFromCloud();
+        scheduleAutoProgress();
         setHash('upload');
       } else {
         const audioId = generateId();
@@ -667,6 +749,7 @@ function bindUploadPageEvents() {
           uploadedAt: Date.now(),
         };
         persist();
+        scheduleAutoProgress();
         setHash('upload');
       }
     } catch (err) {
@@ -708,6 +791,7 @@ function bindUploadPageEvents() {
         if (cloudActive()) {
           await createSubmissionFromPublished(state.currentSeasonId, user.id, work);
           await reloadFromCloud();
+          scheduleAutoProgress();
           setHash('upload');
         } else {
           alert('请先配置云同步');
@@ -735,7 +819,9 @@ function bindPageEvents(page) {
           setCurrentUserId(u.id);
           saveSession({ userId: u.id, userName: u.name });
           grantAdminSessionIfEligible(u.name);
+          await saveSeasonParticipant(state, u.id, { cloudActive, joinSeasonParticipantRemote, saveState });
           await reloadFromCloud();
+          scheduleAutoProgress();
         } else {
           let user = Object.values(state.users).find((u) => u.name === name);
           if (!user) {
@@ -745,7 +831,9 @@ function bindPageEvents(page) {
           state.currentUserId = user.id;
           saveSession({ userId: user.id, userName: user.name });
           grantAdminSessionIfEligible(user.name);
+          await saveSeasonParticipant(state, user.id, { cloudActive: () => false, saveState });
           persist();
+          scheduleAutoProgress();
         }
       } catch (err) {
         alert('加入失败：' + err.message);
@@ -769,6 +857,7 @@ function bindPageEvents(page) {
       onReload: reloadFromCloud,
       onRender: render,
       bindActivity: bindAdminActivityEvents,
+      bindSeasonRules: bindSeasonRulesForm,
       tab: getSettingsTab(),
     });
     if (isCloudEnabled()) subscribeSeasonChanges(scheduleCloudReload);
@@ -812,6 +901,7 @@ function bindPageEvents(page) {
           await createReview(state.currentSeasonId, user.id, subId, scores);
           revokeAudioUrl();
           await reloadFromCloud();
+          scheduleAutoProgress();
           setHash('review');
         } else {
           season.reviews.push({
@@ -824,6 +914,7 @@ function bindPageEvents(page) {
           });
           revokeAudioUrl();
           persist();
+          scheduleAutoProgress();
           setHash('review');
         }
       } catch (err) {
@@ -886,10 +977,16 @@ async function bootstrap() {
     state = await loadState();
   }
   ensureSeason(state, state.currentSeasonId);
+  normalizeAllSeasons();
   const bootUser = currentUser();
-  if (bootUser) grantAdminSessionIfEligible(bootUser.name);
+  if (bootUser) {
+    grantAdminSessionIfEligible(bootUser.name);
+    await saveSeasonParticipant(state, bootUser.id, { cloudActive, joinSeasonParticipantRemote, saveState });
+  }
+  await runAutoProgress();
   if (!location.hash) setHash('home');
   render();
+  scheduleAutoProgress();
 }
 
 window.addEventListener('load', bootstrap);

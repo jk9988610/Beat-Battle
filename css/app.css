@@ -658,3 +658,14 @@ code {
   border-color: rgba(255, 179, 71, 0.5);
   box-shadow: 0 0 0 1px rgba(255, 179, 71, 0.35);
 }
+
+.season-progress-card:empty { display: none; }
+.season-progress-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.88rem;
+  line-height: 1.6;
+}
+.season-progress-list .muted { font-size: 0.8rem; }
+.settings-panel h3 { margin: 1rem 0 0.5rem; font-size: 0.95rem; }
+.checkbox-row { display: flex; align-items: center; gap: 0.5rem; }

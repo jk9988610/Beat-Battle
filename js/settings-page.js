@@ -8,6 +8,13 @@ import {
 } from './config.js';
 import { isAdmin, tryElevateWithPin, revokeAdminSession, getAdminHint } from './admin.js';
 import { initCloud } from './remote.js';
+import {
+  getSeasonRules,
+  getSeasonStats,
+  formatSeasonProgressHtml,
+  normalizeSeason,
+  setDefaultSeasonRulesTemplate,
+} from './season-rules.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -45,8 +52,31 @@ function renderActivityPanel(user, season, cloudHint) {
       <p class="hint">${escapeHtml(getAdminHint())}</p>
       <a href="#settings/admin" class="btn primary">前往管理员验证</a>`;
   }
+  normalizeSeason(season);
+  const stats = getSeasonStats(season);
+  const rules = getSeasonRules(season);
   return `
     <p class="hint">${cloudHint}</p>
+    <div class="season-progress-card">${formatSeasonProgressHtml(season)}</div>
+    <h3>赛季人数与自动推进</h3>
+    <form id="season-rules-form" class="form-col">
+      <label>最少参赛人数（评阅人数）
+        <input type="number" id="rule-min-participants" min="1" max="99" value="${rules.minParticipants}" />
+      </label>
+      <label>最少作品数
+        <input type="number" id="rule-min-submissions" min="1" max="99" value="${rules.minSubmissions}" />
+      </label>
+      <label>公布成绩后自动开新赛季（秒，0=立即）
+        <input type="number" id="rule-new-season-delay" min="0" max="3600" value="${rules.newSeasonDelaySec}" />
+      </label>
+      <label class="checkbox-row">
+        <input type="checkbox" id="rule-auto-progress" ${rules.autoProgress ? 'checked' : ''} />
+        满足条件时自动推进阶段
+      </label>
+      <button type="submit" class="btn primary">保存本赛季规则</button>
+      <p class="hint">报名阶段可直接上传作品，无需等人齐；作品数与参赛人数达标后自动进入评阅；全部评完后自动公布成绩并开启新赛季。</p>
+    </form>
+    <h3>手动阶段</h3>
     <div class="admin-controls">
       <select id="phase-select">
         <option value="register" ${season.phase === 'register' ? 'selected' : ''}>报名中</option>
@@ -173,7 +203,7 @@ export function renderSettingsPage(user, season, cloudHint, tab) {
 }
 
 export function bindSettingsPageEvents(ctx) {
-  const { user, onReload, onRender, bindActivity, tab } = ctx;
+  const { user, onReload, onRender, bindActivity, bindSeasonRules, tab } = ctx;
 
   $('#admin-pin-form')?.addEventListener('submit', (e) => {
     e.preventDefault();
@@ -226,6 +256,22 @@ export function bindSettingsPageEvents(ctx) {
       onRender();
     } catch (err) {
       alert('连接失败：' + err.message);
+    }
+  });
+
+  $('#season-rules-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!user || !isAdmin(user)) {
+      alert('需要管理员权限');
+      return;
+    }
+    if (bindSeasonRules) {
+      await bindSeasonRules({
+        minParticipants: Number($('#rule-min-participants')?.value),
+        minSubmissions: Number($('#rule-min-submissions')?.value),
+        newSeasonDelaySec: Number($('#rule-new-season-delay')?.value),
+        autoProgress: $('#rule-auto-progress')?.checked,
+      });
     }
   });
 

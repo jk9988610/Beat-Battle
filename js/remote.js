@@ -1,6 +1,7 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.1/+esm';
 import { getCloudConfig, isCloudEnabled } from './config.js';
 import { averageScores } from './scoring.js';
+import { DEFAULT_SEASON_RULES, normalizeRules } from './season-rules.js';
 
 let client = null;
 let unsubscribe = null;
@@ -86,6 +87,9 @@ export async function fetchRemoteState() {
       phase: row.phase,
       startedAt: new Date(row.started_at).getTime(),
       endedAt: row.ended_at ? new Date(row.ended_at).getTime() : null,
+      revealedAt: row.revealed_at ? new Date(row.revealed_at).getTime() : null,
+      participantIds: Array.isArray(row.participant_ids) ? [...row.participant_ids] : [],
+      rules: normalizeRules(row.rules || DEFAULT_SEASON_RULES),
       submissions,
       reviews: (revs || []).map((r) => ({
         id: r.id,
@@ -182,16 +186,56 @@ export async function createReview(seasonId, reviewerId, submissionId, scores) {
 export async function updateSeasonPhase(seasonId, phase) {
   const sb = getClient();
   const patch = { phase };
-  if (phase === 'revealed') patch.ended_at = new Date().toISOString();
+  const now = new Date().toISOString();
+  if (phase === 'revealed') {
+    patch.ended_at = now;
+    patch.revealed_at = now;
+  }
   const { error } = await sb.from('seasons').update(patch).eq('id', seasonId);
+  if (error) throw error;
+}
+
+export async function updateSeasonRulesRemote(seasonId, rules) {
+  const sb = getClient();
+  const { error } = await sb
+    .from('seasons')
+    .update({ rules: normalizeRules(rules) })
+    .eq('id', seasonId);
+  if (error) throw error;
+}
+
+export async function joinSeasonParticipantRemote(seasonId, userId) {
+  const sb = getClient();
+  const { data: row, error: fetchErr } = await sb
+    .from('seasons')
+    .select('participant_ids')
+    .eq('id', seasonId)
+    .single();
+  if (fetchErr) throw fetchErr;
+  const ids = new Set(row?.participant_ids || []);
+  ids.add(userId);
+  const { error } = await sb
+    .from('seasons')
+    .update({ participant_ids: [...ids] })
+    .eq('id', seasonId);
   if (error) throw error;
 }
 
 export async function startNewSeason(currentSeasonId) {
   const sb = getClient();
-  await updateSeasonPhase(currentSeasonId, 'revealed');
+  const { data: cur } = await sb.from('seasons').select('rules').eq('id', currentSeasonId).single();
+  const now = new Date().toISOString();
+  await sb
+    .from('seasons')
+    .update({ phase: 'revealed', ended_at: now, revealed_at: now })
+    .eq('id', currentSeasonId);
   const nextId = currentSeasonId + 1;
-  await sb.from('seasons').upsert({ id: nextId, phase: 'register' });
+  await sb.from('seasons').upsert({
+    id: nextId,
+    phase: 'register',
+    rules: cur?.rules || normalizeRules(DEFAULT_SEASON_RULES),
+    participant_ids: [],
+  });
   return nextId;
 }
 

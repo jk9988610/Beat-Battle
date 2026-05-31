@@ -92,6 +92,9 @@ export function ensureSeason(state, seasonId) {
       phase: 'register',
       startedAt: Date.now(),
       endedAt: null,
+      revealedAt: null,
+      participantIds: [],
+      rules: null,
       submissions: {},
       reviews: [],
     };
@@ -164,6 +167,8 @@ export async function importSeasonData(state, payload) {
   state.seasons[sid] = {
     ...existing,
     ...payload.season,
+    participantIds: payload.season.participantIds || existing.participantIds || [],
+    rules: payload.season.rules || existing.rules || null,
     submissions: mergedSubs,
     reviews: mergedReviews,
   };
