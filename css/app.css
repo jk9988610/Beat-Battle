@@ -468,3 +468,31 @@ code {
 .admin-section.admin-active {
   border-color: var(--success);
 }
+
+.nav-settings {
+  text-decoration: none;
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 0.15rem 0.35rem;
+  border-radius: 6px;
+}
+.nav-settings:hover {
+  background: var(--surface2);
+}
+
+.form-col textarea {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: inherit;
+  resize: vertical;
+  min-height: 4rem;
+}
+
+.admin-ok {
+  color: var(--success);
+  font-size: 0.9rem;
+  margin: 0;
+}

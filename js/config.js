@@ -8,15 +8,43 @@ export const DEFAULT_CLOUD_CONFIG = {
     'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlqcWtvdHFtZ2x4amhscmh5bnN1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAxOTMzNDQsImV4cCI6MjA5NTc2OTM0NH0.Cm4WjiR4NXS4RrA15frLVMZPbGUyGyjaIYQXSRua8Ew',
 };
 
-/**
- * 管理员指定方式（二选一或同时使用）
- * 1. ADMIN_USER_NAMES：用这些昵称「加入本赛季」即为管理员
- * 2. ADMIN_PIN：普通昵称登录后，在主页输入口令可临时获得管理权限（仅当前浏览器标签页）
- *
- * 请修改 ADMIN_PIN，勿使用默认值 bb2026
- */
-export const ADMIN_USER_NAMES = ['管理员', '主持人'];
-export const ADMIN_PIN = 'bb2026';
+/** 默认管理员配置（可在「设置」页修改，保存到本机） */
+export const DEFAULT_ADMIN_SETTINGS = {
+  userNames: ['管理员', '主持人'],
+  pin: 'bb2026',
+};
+
+const LS_ADMIN_SETTINGS = 'beat-battle-admin-settings';
+
+export function getAdminSettings() {
+  try {
+    const raw = localStorage.getItem(LS_ADMIN_SETTINGS);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return {
+        userNames: Array.isArray(parsed.userNames)
+          ? parsed.userNames.filter(Boolean)
+          : [...DEFAULT_ADMIN_SETTINGS.userNames],
+        pin: parsed.pin ?? DEFAULT_ADMIN_SETTINGS.pin,
+      };
+    }
+  } catch {
+    /* ignore */
+  }
+  return { ...DEFAULT_ADMIN_SETTINGS, userNames: [...DEFAULT_ADMIN_SETTINGS.userNames] };
+}
+
+export function setAdminSettings({ userNames, pin }) {
+  const names = (Array.isArray(userNames) ? userNames : String(userNames).split(/[,，、\n]/))
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (!names.length) throw new Error('至少保留一个管理员昵称');
+  if (!pin || !String(pin).trim()) throw new Error('请设置管理员口令');
+  localStorage.setItem(
+    LS_ADMIN_SETTINGS,
+    JSON.stringify({ userNames: names, pin: String(pin).trim() })
+  );
+}
 
 export function getCloudConfig() {
   try {

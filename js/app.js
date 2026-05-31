@@ -9,6 +9,7 @@ import {
   getAdminHint,
   isAdminByName,
 } from './admin.js';
+import { renderSettingsPage, bindSettingsPageEvents } from './settings-page.js';
 import {
   loadState,
   saveState,
@@ -172,31 +173,6 @@ function sortByScore(items, getter) {
   });
 }
 
-function cloudSettingsHtml() {
-  const cfg = getCloudConfig();
-  const on = isCloudEnabled();
-  const builtIn = hasBuiltInCloudConfig();
-  return `
-    <div class="card cloud-card">
-      <h2>云同步 <span class="sync-badge ${on ? 'on' : 'off'}">${on ? '已连接' : '未连接'}</span></h2>
-      <p class="hint">${
-        builtIn
-          ? '已内置 Supabase 项目，打开页面即自动云端同步，无需再填 API。'
-          : '配置 Supabase 后，甲/乙/丙多端自动同步；编曲制作页可调用 SDK 直传。'
-      }</p>
-      <details ${builtIn && on ? '' : 'open'}>
-        <summary>${builtIn ? '更换云项目（一般不用改）' : 'Supabase 配置'}</summary>
-        <div class="form-col">
-          <label>Project URL <input type="url" id="sb-url" placeholder="https://xxx.supabase.co" value="${escapeHtml(cfg.url)}" /></label>
-          <label>anon public key <input type="password" id="sb-key" placeholder="eyJ..." value="${escapeHtml(cfg.anonKey)}" autocomplete="off" /></label>
-          <button type="button" class="btn primary" id="btn-save-cloud">保存并连接</button>
-          <a href="https://github.com/jk9988610/Beat-Battle/blob/main/docs/integrate-production.md" class="link-doc" target="_blank" rel="noopener">制作页接入说明 →</a>
-        </div>
-      </details>
-    </div>`;
-}
-
-
 function renderAdminPanel(user, season, cloudHint) {
   const admin = user && isAdmin(user);
   if (!user) {
@@ -211,10 +187,7 @@ function renderAdminPanel(user, season, cloudHint) {
     <div class="card admin-section">
       <h2>活动管理 <span class="sync-badge off">仅管理员</span></h2>
       <p class="hint">${escapeHtml(getAdminHint())}</p>
-      <form id="admin-pin-form" class="form-row">
-        <input type="password" id="admin-pin" placeholder="管理员口令" autocomplete="off" />
-        <button type="submit" class="btn primary">验证</button>
-      </form>
+      <a href="#settings" class="btn">前往设置验证</a>
     </div>`;
   }
   return `
@@ -230,7 +203,6 @@ function renderAdminPanel(user, season, cloudHint) {
         </select>
         <button type="button" class="btn" id="btn-set-phase">更新阶段</button>
         <button type="button" class="btn warn" id="btn-end-season">结束本赛季并开始下一季</button>
-        <button type="button" class="btn ghost btn-sm" id="btn-revoke-admin">退出管理</button>
       </div>
       <div class="import-export ${isCloudEnabled() ? 'muted-section' : ''}">
         <button type="button" class="btn" id="btn-export">导出备份</button>
@@ -240,6 +212,12 @@ function renderAdminPanel(user, season, cloudHint) {
         </label>
       </div>
     </div>`;
+}
+
+
+function renderSettings() {
+  const user = currentUser();
+  return renderSettingsPage(user);
 }
 
 function renderHome() {
@@ -261,7 +239,6 @@ function renderHome() {
       <span>第 <strong>${season.id}</strong> 赛季</span>
       <span class="phase-tag phase-${season.phase}">${phaseLabel(season.phase)}</span>
     </div>
-    ${cloudSettingsHtml()}
     ${
       !user
         ? `
@@ -498,6 +475,9 @@ function render() {
     case 'rankings':
       html = renderRankings();
       break;
+    case 'settings':
+      html = renderSettings();
+      break;
     default:
       html = renderHome();
   }
@@ -507,24 +487,6 @@ function render() {
 
 function bindPageEvents(page) {
   if (page === 'home' || !page) {
-    $('#btn-save-cloud')?.addEventListener('click', async () => {
-      const url = $('#sb-url').value.trim();
-      const anonKey = $('#sb-key').value.trim();
-      if (!url || !anonKey) {
-        alert('请填写 Supabase URL 与 anon key');
-        return;
-      }
-      setCloudConfig({ url, anonKey });
-      initCloud();
-      try {
-        await reloadFromCloud();
-        subscribeSeasonChanges(scheduleCloudReload);
-        alert('云同步已连接');
-      } catch (err) {
-        alert('连接失败：' + err.message);
-      }
-    });
-
     $('#join-form')?.addEventListener('submit', async (e) => {
       e.preventDefault();
       const name = $('#display-name').value.trim();
@@ -548,22 +510,6 @@ function bindPageEvents(page) {
       } catch (err) {
         alert('加入失败：' + err.message);
       }
-    });
-
-    $('#admin-pin-form')?.addEventListener('submit', (e) => {
-      e.preventDefault();
-      const pin = $('#admin-pin')?.value;
-      if (tryElevateWithPin(pin)) {
-        alert('已通过管理员验证');
-        render();
-      } else {
-        alert('口令错误');
-      }
-    });
-
-    $('#btn-revoke-admin')?.addEventListener('click', () => {
-      revokeAdminSession();
-      render();
     });
 
     $('#btn-switch-user')?.addEventListener('click', () => {
@@ -653,6 +599,16 @@ function bindPageEvents(page) {
       }
       e.target.value = '';
     });
+  }
+
+
+  if (page === 'settings') {
+    bindSettingsPageEvents({
+      user: currentUser(),
+      onReload: reloadFromCloud,
+      onRender: render,
+    });
+    if (isCloudEnabled()) subscribeSeasonChanges(scheduleCloudReload);
   }
 
   if (page === 'upload') {
