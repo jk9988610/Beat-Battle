@@ -27,7 +27,8 @@ import { saveSession, clearSession, loadSession, MUSIC_PROD_URL } from './sessio
 import {
   listPublishedWorks,
   createSubmissionFromPublished,
-  resolveWorkPreviewUrl,
+  getWorkPublicPreviewUrl,
+  resolveWorkPreviewBlobUrl,
   revokeWorkPreviewUrl,
 } from './published-works.js';
 import {
@@ -64,6 +65,43 @@ let autoProgressTimer = null;
 
 const $ = (sel) => document.querySelector(sel);
 
+let pendingRenderAfterPreview = false;
+
+function getLibraryPreviewPlayer() {
+  return document.getElementById('library-preview-player');
+}
+
+function isLibraryPreviewActive() {
+  const player = getLibraryPreviewPlayer();
+  if (!player || !player.src) return false;
+  return !player.paused || (player.currentTime > 0 && !player.ended);
+}
+
+function renderUnlessPreviewing() {
+  if (isLibraryPreviewActive()) {
+    pendingRenderAfterPreview = true;
+    return false;
+  }
+  render();
+  return true;
+}
+
+function bindLibraryPreviewEndHandler() {
+  const player = getLibraryPreviewPlayer();
+  if (!player || player.dataset.boundPreviewEnd) return;
+  player.dataset.boundPreviewEnd = '1';
+  player.addEventListener('pause', () => {
+    if (!isLibraryPreviewActive() && pendingRenderAfterPreview) {
+      pendingRenderAfterPreview = false;
+      render();
+    }
+  });
+  player.addEventListener('ended', () => {
+    pendingRenderAfterPreview = false;
+    render();
+  });
+}
+
 function normalizeAllSeasons() {
   if (!state?.seasons) return;
   for (const s of Object.values(state.seasons)) normalizeSeason(s);
@@ -81,7 +119,7 @@ function persistStateOnly() {
 
 function persist() {
   persistStateOnly();
-  render();
+  renderUnlessPreviewing();
   scheduleAutoProgress();
 }
 
@@ -90,7 +128,7 @@ async function reloadFromCloud() {
   state = await loadState();
   normalizeAllSeasons();
   await runAutoProgress();
-  render();
+  renderUnlessPreviewing();
   scheduleAutoProgress();
 }
 
@@ -117,7 +155,7 @@ function scheduleAutoProgress(delayMs = 300) {
   autoProgressTimer = setTimeout(async () => {
     try {
       const result = await runAutoProgress();
-      if (result.changed) render();
+      if (result.changed) renderUnlessPreviewing();
       const season = getCurrentSeason(state);
       const rules = getSeasonRules(season);
       if (rules.autoProgress) scheduleAutoProgress(season.phase === 'revealed' ? 5000 : 8000);
@@ -134,7 +172,7 @@ function currentUser() {
 function setHash(route) {
   const path = route.startsWith('#') ? route.slice(1) : route;
   if (location.hash.replace(/^#/, '') === path) {
-    render();
+    renderUnlessPreviewing();
   } else {
     location.hash = path;
   }
@@ -511,7 +549,7 @@ function renderUpload() {
     <div class="card upload-panel ${uploadMode === 'library' ? '' : 'hidden'}" id="upload-panel-library">
       <p class="hint">从 HarmonyForge 发布到制作库的作品可在此一键提交参赛。</p>
       <ul class="published-list">${libraryItems}</ul>
-      <audio id="library-preview-player" controls playsinline webkit-playsinline class="audio-player library-preview" hidden></audio>
+      <p class="hint">试听后底部会出现播放器，播放中页面不会自动刷新打断。</p>
     </div>`
         : ''
     }
@@ -687,6 +725,30 @@ function render() {
 }
 
 
+function updatePublishedListDom() {
+  const list = document.querySelector('.published-list');
+  if (!list || getPage() !== 'upload') return;
+  if (!publishedWorksCache.length) {
+    list.innerHTML = '<li class="muted published-empty">制作库暂无作品，请先在编曲站发布。</li>';
+    return;
+  }
+  list.innerHTML = publishedWorksCache
+    .map(
+      (w) => `
+        <li class="published-item" data-work-id="${w.id}">
+          <div class="published-meta">
+            <strong>${escapeHtml(w.title)}</strong>
+            <span class="muted">${new Date(w.publishedAt).toLocaleString('zh-CN')}</span>
+          </div>
+          <div class="published-actions">
+            <button type="button" class="btn ghost btn-sm btn-preview-work" data-work-id="${w.id}">试听</button>
+            <button type="button" class="btn primary btn-sm btn-submit-work" data-work-id="${w.id}">提交参赛</button>
+          </div>
+        </li>`
+    )
+    .join('');
+}
+
 async function refreshPublishedWorks() {
   const user = currentUser();
   if (!user || !isCloudEnabled()) {
@@ -699,6 +761,87 @@ async function refreshPublishedWorks() {
     console.error(err);
     publishedWorksCache = [];
   }
+}
+
+
+function bindLibraryWorkDelegation() {
+  if (document.body.dataset.libraryDelegation) return;
+  document.body.dataset.libraryDelegation = '1';
+
+  document.addEventListener('click', async (e) => {
+    const previewBtn = e.target.closest('.btn-preview-work');
+  if (previewBtn && getPage() === 'upload') {
+      e.preventDefault();
+      const work = publishedWorksCache.find((w) => w.id === previewBtn.dataset.workId);
+      const player = getLibraryPreviewPlayer();
+      const dock = document.getElementById('library-preview-dock');
+      if (!work || !player || !dock) {
+        alert('无法加载作品信息');
+        return;
+      }
+      const prevLabel = previewBtn.textContent;
+      previewBtn.disabled = true;
+      previewBtn.textContent = '加载中…';
+      bindLibraryPreviewEndHandler();
+      try {
+        const publicUrl = getWorkPublicPreviewUrl(work);
+        const playUrl = async (url) => {
+          dock.hidden = false;
+          player.src = url;
+          player.load();
+          await player.play();
+        };
+        if (publicUrl) {
+          try {
+            await playUrl(publicUrl);
+          } catch {
+            const blobUrl = await resolveWorkPreviewBlobUrl(work);
+            await playUrl(blobUrl);
+          }
+        } else {
+          const blobUrl = await resolveWorkPreviewBlobUrl(work);
+          await playUrl(blobUrl);
+        }
+      } catch (err) {
+        alert('试听失败：' + (err.message || err));
+      } finally {
+        previewBtn.disabled = false;
+        previewBtn.textContent = prevLabel;
+      }
+      return;
+    }
+
+    const submitBtn = e.target.closest('.btn-submit-work');
+    if (submitBtn && getPage() === 'upload') {
+      e.preventDefault();
+      const user = currentUser();
+      const work = publishedWorksCache.find((w) => w.id === submitBtn.dataset.workId);
+      if (!user || !work) return;
+      submitBtn.disabled = true;
+      const prev = submitBtn.textContent;
+      submitBtn.textContent = '提交中…';
+      try {
+        if (cloudActive()) {
+          await createSubmissionFromPublished(state.currentSeasonId, user.id, work);
+          try {
+            await reloadFromCloud();
+          } catch (reloadErr) {
+            console.error(reloadErr);
+            alert('作品已提交，但刷新列表失败：' + reloadErr.message + '\n请点底部「更新」后查看主页');
+          }
+          scheduleAutoProgress();
+          setHash('home');
+          alert('提交成功！可在主页查看「已上传」数量');
+        } else {
+          alert('请先配置云同步');
+        }
+      } catch (err) {
+        alert('提交失败：' + err.message);
+        submitBtn.disabled = false;
+        submitBtn.textContent = prev;
+      }
+    }
+  });
 }
 
 function bindUploadPageEvents() {
@@ -767,69 +910,11 @@ function bindUploadPageEvents() {
   document.querySelectorAll('.upload-tab').forEach((tab) => {
     tab.addEventListener('click', async () => {
       uploadMode = tab.dataset.mode || 'local';
-      if (uploadMode === 'library') await refreshPublishedWorks();
-      render();
-    });
-  });
-
-  document.querySelectorAll('.btn-preview-work').forEach((el) => {
-    el.addEventListener('click', async () => {
-      const work = publishedWorksCache.find((w) => w.id === el.dataset.workId);
-      const player = $('#library-preview-player');
-      if (!work || !player) {
-        alert('无法加载作品信息');
-        return;
+      if (uploadMode === 'library') {
+        await refreshPublishedWorks();
+        updatePublishedListDom();
       }
-      const prevLabel = el.textContent;
-      el.disabled = true;
-      el.textContent = '加载中…';
-      try {
-        const { url, error } = await resolveWorkPreviewUrl(work);
-        if (!url) {
-          alert(error || '试听失败：无法获取音频地址');
-          return;
-        }
-        player.hidden = false;
-        player.src = url;
-        player.load();
-        await player.play();
-      } catch (err) {
-        alert('试听失败：' + (err.message || err));
-      } finally {
-        el.disabled = false;
-        el.textContent = prevLabel;
-      }
-    });
-  });
-
-  document.querySelectorAll('.btn-submit-work').forEach((el) => {
-    el.addEventListener('click', async () => {
-      const user = currentUser();
-      const work = publishedWorksCache.find((w) => w.id === el.dataset.workId);
-      if (!user || !work) return;
-      el.disabled = true;
-      const prev = el.textContent;
-      el.textContent = '提交中…';
-      try {
-        if (cloudActive()) {
-          await createSubmissionFromPublished(state.currentSeasonId, user.id, work);
-          try {
-            await reloadFromCloud();
-          } catch (reloadErr) {
-            console.error(reloadErr);
-            alert('作品已提交，但刷新列表失败：' + reloadErr.message + '\n请点底部「更新」后查看主页');
-          }
-          scheduleAutoProgress();
-          setHash('home');
-          alert('提交成功！可在主页查看「已上传」数量');
-        } else {
-          alert('请先配置云同步');
-        }
-      } catch (err) {
-        alert('提交失败：' + err.message);
-        el.disabled = false;
-        el.textContent = prev;
-      }
+      renderUnlessPreviewing();
     });
   });
 }
@@ -895,7 +980,10 @@ function bindPageEvents(page) {
   if (page === 'upload') {
     if (isCloudEnabled() && uploadMode === 'library') {
       refreshPublishedWorks().then(() => {
-        if (getPage() === 'upload') render();
+        if (getPage() === 'upload') {
+          updatePublishedListDom();
+          renderUnlessPreviewing();
+        }
       });
     }
     bindUploadPageEvents();
@@ -961,8 +1049,17 @@ function createFileList(file) {
 
 window.addEventListener('hashchange', () => {
   revokeAudioUrl();
-  revokeWorkPreviewUrl();
-  render();
+  if (!location.hash.includes('upload')) {
+    const dock = document.getElementById('library-preview-dock');
+    const player = getLibraryPreviewPlayer();
+    if (player) {
+      player.pause();
+      player.removeAttribute('src');
+    }
+    if (dock) dock.hidden = true;
+    revokeWorkPreviewUrl();
+  }
+  renderUnlessPreviewing();
 });
 
 function bindDebugCopy() {
@@ -991,6 +1088,8 @@ async function bootstrap() {
   await loadVersionMeta();
   updateVersionUI();
   bindDebugCopy();
+  bindLibraryPreviewEndHandler();
+  bindLibraryWorkDelegation();
   initUpdateUI();
   bindGlobalNav();
   if (isCloudEnabled()) {

@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="bb-app-version" content="1.8.1" />
+    <meta name="bb-app-version" content="1.8.2" />
     <meta name="bb-app-build" content="dev" />
     <meta name="description" content="Beat Battle 音频盲评 — 上传、评阅、云端同步、赛季排名" />
     <title>Beat Battle · 音频评阅</title>
@@ -21,6 +21,16 @@
       </div>
     </nav>
     <main id="app"></main>
+    <div id="library-preview-dock" class="library-preview-dock" hidden>
+      <span class="library-preview-label">制作库试听</span>
+      <audio
+        id="library-preview-player"
+        controls
+        playsinline
+        webkit-playsinline
+        class="audio-player library-preview"
+      ></audio>
+    </div>
     <footer class="app-footer">
       <span id="footer-version" class="bb-version-badge" title="当前版本"><span class="bb-version-label">加载版本…</span></span>
       <button type="button" class="btn ghost btn-sm" id="btn-update" title="检查并更新到最新版本">更新</button>

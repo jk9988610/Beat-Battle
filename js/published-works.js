@@ -68,42 +68,19 @@ export async function publishWork({ userId, userName, title, audioBlob }) {
   return mapRow(data);
 }
 
-/**
- * 获取可播放 URL：优先公网直链，失败则下载为 Blob URL（适配平板/Storage 策略）
- */
-export async function resolveWorkPreviewUrl(work) {
-  if (!work?.audioPath) return { url: '', error: '缺少音频路径' };
-
-  const publicUrl = work.audioUrl || getPublicAudioUrl(work.audioPath);
-  if (publicUrl) {
-    const probe = await canPlayUrl(publicUrl);
-    if (probe) return { url: publicUrl, revoke: false };
-  }
-
-  try {
-    const blob = await downloadAudioFromCloud(work.audioPath);
-    revokeWorkPreviewUrl();
-    previewObjectUrl = URL.createObjectURL(blob);
-    return { url: previewObjectUrl, revoke: true };
-  } catch (err) {
-    if (publicUrl) return { url: publicUrl, revoke: false };
-    return { url: '', error: formatSupabaseError(err) };
-  }
+/** 公网直链（立即播放，不在此处预检测避免延迟） */
+export function getWorkPublicPreviewUrl(work) {
+  if (!work?.audioPath) return '';
+  return work.audioUrl || getPublicAudioUrl(work.audioPath);
 }
 
-function canPlayUrl(url) {
-  return new Promise((resolve) => {
-    const a = new Audio();
-    const done = (ok) => {
-      a.src = '';
-      resolve(ok);
-    };
-    a.addEventListener('canplay', () => done(true), { once: true });
-    a.addEventListener('error', () => done(false), { once: true });
-    a.preload = 'metadata';
-    a.src = url;
-    setTimeout(() => done(false), 4000);
-  });
+/** 下载为 Blob URL（公网失败时回退） */
+export async function resolveWorkPreviewBlobUrl(work) {
+  if (!work?.audioPath) throw new Error('缺少音频路径');
+  const blob = await downloadAudioFromCloud(work.audioPath);
+  revokeWorkPreviewUrl();
+  previewObjectUrl = URL.createObjectURL(blob);
+  return previewObjectUrl;
 }
 
 /**
