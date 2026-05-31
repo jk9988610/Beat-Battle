@@ -11,12 +11,20 @@
     <nav class="top-nav">
       <a href="#home">Beat Battle</a>
       <div class="nav-meta">
+        <span id="nav-version" class="nav-version" title="构建版本">…</span>
         <span id="nav-sync" title="云同步状态">💾</span>
         <span id="nav-season">S1</span>
         <span id="nav-user">未登录</span>
       </div>
     </nav>
     <main id="app"></main>
+    <footer class="app-footer">
+      <span id="footer-version">加载版本…</span>
+      <button type="button" class="btn ghost btn-sm" id="btn-copy-debug" title="复制版本与运行状态，便于反馈问题">
+        复制调试信息
+      </button>
+      <span id="copy-debug-toast" class="copy-toast" hidden>已复制</span>
+    </footer>
     <script type="module" src="js/app.js"></script>
   </body>
 </html>

@@ -1,4 +1,6 @@
 import { CRITERIA, CRITERIA_IDS, averageScores } from './scoring.js';
+import { loadVersionMeta, formatVersionLabel } from './version.js';
+import { copyDebugInfo } from './debug.js';
 import {
   loadState,
   saveState,
@@ -425,6 +427,17 @@ function escapeHtml(s) {
   return d.innerHTML;
 }
 
+function updateVersionUI() {
+  const label = formatVersionLabel();
+  const ver = $('#nav-version');
+  const foot = $('#footer-version');
+  if (ver) {
+    ver.textContent = label;
+    ver.title = `Beat Battle ${label}\n点击底部「复制调试信息」可发给开发者`;
+  }
+  if (foot) foot.textContent = label;
+}
+
 function render() {
   if (!state) {
     $('#app').innerHTML = '<div class="card empty-state"><p>加载中…</p></div>';
@@ -432,6 +445,7 @@ function render() {
   }
   const page = getPage();
   const navUser = currentUser();
+  updateVersionUI();
   $('#nav-season').textContent = `S${state.currentSeasonId}`;
   $('#nav-user').textContent = navUser ? navUser.name : '未登录';
   const syncEl = $('#nav-sync');
@@ -699,7 +713,25 @@ window.addEventListener('hashchange', () => {
   render();
 });
 
+function bindDebugCopy() {
+  $('#btn-copy-debug')?.addEventListener('click', async () => {
+    try {
+      await copyDebugInfo(state);
+      const toast = $('#copy-debug-toast');
+      if (toast) {
+        toast.hidden = false;
+        setTimeout(() => { toast.hidden = true; }, 2000);
+      }
+    } catch (err) {
+      alert('复制失败：' + err.message);
+    }
+  });
+}
+
 async function bootstrap() {
+  await loadVersionMeta();
+  updateVersionUI();
+  bindDebugCopy();
   if (isCloudEnabled()) {
     initCloud();
     try {

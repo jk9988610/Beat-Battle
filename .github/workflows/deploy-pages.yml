@@ -24,6 +24,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Stamp build version
+        run: |
+          SHA=$(git rev-parse --short HEAD)
+          DATE=$(date -u +%Y%m%d-%H%M%S)
+          VERSION=$(node -e "console.log(require('./version.json').version)")
+          node -e "
+            const fs = require('fs');
+            const v = JSON.parse(fs.readFileSync('version.json','utf8'));
+            v.build = process.env.BUILD;
+            fs.writeFileSync('version.json', JSON.stringify(v, null, 2) + '\n');
+          " BUILD="${SHA}-${DATE}"
+          echo "Deployed build: v${VERSION} · ${SHA}-${DATE}"
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
