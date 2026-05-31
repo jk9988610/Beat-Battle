@@ -42,6 +42,8 @@ export function normalizeRules(rules = {}) {
 }
 
 export function normalizeSeason(season) {
+  if (!season.submissions || typeof season.submissions !== 'object') season.submissions = {};
+  if (!Array.isArray(season.reviews)) season.reviews = [];
   if (!season.participantIds) season.participantIds = [];
   season.rules = normalizeRules(season.rules || getDefaultSeasonRulesTemplate());
   if (season.revealedAt == null) season.revealedAt = null;

@@ -34,7 +34,7 @@ function isPlayerAudible(player) {
 }
 
 export function shouldDeferUiRefresh() {
-  return previewLock || isPlayerAudible(getLibraryPreviewPlayer());
+  return previewLock;
 }
 
 export function lockLibraryPreview() {

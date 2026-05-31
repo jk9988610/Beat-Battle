@@ -76,12 +76,27 @@ let autoProgressTimer = null;
 
 const $ = (sel) => document.querySelector(sel);
 
+function showBootError(err) {
+  console.error(err);
+  const app = document.getElementById('app');
+  if (!app) return;
+  app.innerHTML = `<div class="card empty-state"><p>加载失败</p><p class="hint">${escapeHtml(err?.message || String(err))}</p><p class="hint">请点顶栏「更新」或检查网络。</p></div>`;
+}
+
+function safeRender() {
+  try {
+    render();
+  } catch (err) {
+    showBootError(err);
+  }
+}
+
 function renderUnlessPreviewing() {
   if (shouldDeferUiRefresh()) {
     markPendingUiRefresh();
     return false;
   }
-  render();
+  safeRender();
   return true;
 }
 
@@ -90,7 +105,7 @@ function flushPendingUiWork() {
     reloadFromCloud();
     return;
   }
-  if (consumePendingUiRefresh()) render();
+  if (consumePendingUiRefresh()) safeRender();
 }
 
 function normalizeAllSeasons() {
@@ -207,7 +222,7 @@ function revokeAudioUrl() {
 async function playSubmission(submissionId) {
   revokeAudioUrl();
   const season = getCurrentSeason(state);
-  const sub = season.submissions[submissionId];
+  const sub = (season.submissions || {})[submissionId];
   if (!sub) return;
   const blob = await getAudioBlob(sub.audioId);
   if (!blob) {
@@ -224,26 +239,26 @@ async function playSubmission(submissionId) {
 
 function submissionsForUser(userId) {
   const season = getCurrentSeason(state);
-  return Object.values(season.submissions).filter((s) => s.userId === userId);
+  return Object.values(season.submissions || {}).filter((s) => s.userId === userId);
 }
 
 function reviewsByUser(userId) {
   const season = getCurrentSeason(state);
-  return season.reviews.filter((r) => r.reviewerId === userId);
+  return (season.reviews || []).filter((r) => r.reviewerId === userId);
 }
 
 function reviewableSubmissions(userId) {
   const season = getCurrentSeason(state);
   const reviewed = new Set(
-    season.reviews.filter((r) => r.reviewerId === userId).map((r) => r.submissionId)
+    (season.reviews || []).filter((r) => r.reviewerId === userId).map((r) => r.submissionId)
   );
-  return Object.values(season.submissions).filter(
+  return Object.values(season.submissions || {}).filter(
     (s) => s.userId !== userId && !reviewed.has(s.id)
   );
 }
 
 function computeRankings(season) {
-  const subs = Object.values(season.submissions);
+  const subs = Object.values(season.submissions || {});
   const bySubmission = {};
 
   for (const sub of subs) {
@@ -256,7 +271,7 @@ function computeRankings(season) {
     };
   }
 
-  for (const review of season.reviews) {
+  for (const review of season.reviews || []) {
     const entry = bySubmission[review.submissionId];
     if (!entry) continue;
     entry.reviewCount++;
@@ -587,7 +602,7 @@ function renderReview() {
 
   const sub = queue[0];
   const progress = reviewsByUser(user.id).length;
-  const totalOthers = Object.values(season.submissions).filter((s) => s.userId !== user.id).length;
+  const totalOthers = Object.values(season.submissions || {}).filter((s) => s.userId !== user.id).length;
 
   const criteriaHtml = CRITERIA.map(
     (c) => `
@@ -693,12 +708,14 @@ function updateVersionUI() {
 }
 
 function render() {
+  const appEl = document.getElementById('app');
   if (!state) {
-    $('#app').innerHTML = '<div class="card empty-state"><p>加载中…</p></div>';
+    if (appEl) appEl.innerHTML = '<div class="card empty-state"><p>加载中…</p></div>';
     return;
   }
   const page = getPage();
   const navUser = currentUser();
+  const appEl = document.getElementById('app');
   updateVersionUI();
   $('#nav-season').textContent = `S${state.currentSeasonId}`;
   $('#nav-user').textContent = navUser
@@ -724,7 +741,7 @@ function render() {
     default:
       html = renderHome();
   }
-  $('#app').innerHTML = html;
+  if (appEl) appEl.innerHTML = html;
   bindPageEvents(page);
 }
 
@@ -1060,42 +1077,48 @@ function bindGlobalNav() {
 }
 
 async function bootstrap() {
-  await loadVersionMeta();
-  updateVersionUI();
-  bindDebugCopy();
-  bindLibraryPreviewLifecycle();
-  setLibraryPreviewUnlockHandler(flushPendingUiWork);
-  bindLibraryWorkDelegation();
-  initUpdateUI();
-  bindGlobalNav();
-  if (isCloudEnabled()) {
-    initCloud();
-    try {
+  stopLibraryPreview();
+  const appEl = document.getElementById('app');
+  if (appEl) appEl.innerHTML = '<div class="card empty-state"><p>加载中…</p></div>';
+
+  try {
+    await loadVersionMeta();
+    updateVersionUI();
+    bindDebugCopy();
+    bindLibraryPreviewLifecycle();
+    setLibraryPreviewUnlockHandler(flushPendingUiWork);
+    bindLibraryWorkDelegation();
+    initUpdateUI();
+    bindGlobalNav();
+
+    if (isCloudEnabled()) {
+      initCloud();
       state = await loadState();
       subscribeSeasonChanges(scheduleCloudReload);
-    } catch (err) {
-      console.error(err);
-      $('#app').innerHTML = `<div class="card empty-state"><p>云同步连接失败：${escapeHtml(err.message)}</p><p class="hint">请确认 Supabase 已执行 schema.sql 与 audio 存储桶。</p></div>`;
-      return;
+    } else {
+      state = await loadState();
     }
-  } else {
-    state = await loadState();
-  }
-  ensureSeason(state, state.currentSeasonId);
-  normalizeAllSeasons();
-  const bootUser = currentUser();
-  if (bootUser) {
-    grantAdminSessionIfEligible(bootUser.name);
-    await saveSeasonParticipant(state, bootUser.id, { cloudActive, joinSeasonParticipantRemote, saveState });
-  }
-  try {
-    await runAutoProgress();
+
+    ensureSeason(state, state.currentSeasonId);
+    normalizeAllSeasons();
+
+    if (!location.hash || location.hash === '#') location.hash = 'home';
+    safeRender();
+
+    const bootUser = currentUser();
+    if (bootUser) {
+      grantAdminSessionIfEligible(bootUser.name);
+      saveSeasonParticipant(state, bootUser.id, {
+        cloudActive,
+        joinSeasonParticipantRemote,
+        saveState,
+      }).catch((e) => console.warn('participant', e));
+    }
+    runAutoProgress().catch((e) => console.warn('auto progress', e));
+    scheduleAutoProgress();
   } catch (err) {
-    console.error('auto progress on boot', err);
+    showBootError(err);
   }
-  if (!location.hash) location.hash = 'home';
-  render();
-  scheduleAutoProgress();
 }
 
 window.addEventListener('load', bootstrap);
