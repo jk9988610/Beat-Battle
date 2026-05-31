@@ -12,7 +12,7 @@
  * });
  * await BeatBattle.uploadAudio(wavBlob); // 或 export 得到的 Blob
  */
-import { setCloudConfig, isCloudEnabled } from './config.js';
+import { setCloudConfig, isCloudEnabled, getCloudConfig, DEFAULT_CLOUD_CONFIG } from './config.js';
 import {
   initCloud,
   findOrCreateUser,
@@ -33,14 +33,17 @@ export const BeatBattle = {
    * @param {string} opts.userName 参赛者昵称（与评阅站一致）
    * @param {number} [opts.seasonId] 赛季 ID，默认当前最新赛季
    */
-  async init(opts) {
-    if (!opts?.supabaseUrl || !opts?.supabaseAnonKey) {
-      throw new Error('请提供 supabaseUrl 与 supabaseAnonKey');
+  async init(opts = {}) {
+    const url = opts.supabaseUrl || DEFAULT_CLOUD_CONFIG.url || getCloudConfig().url;
+    const anonKey =
+      opts.supabaseAnonKey || DEFAULT_CLOUD_CONFIG.anonKey || getCloudConfig().anonKey;
+    if (!url || !anonKey) {
+      throw new Error('请提供 supabaseUrl 与 supabaseAnonKey，或在 Beat-Battle config.js 中预置');
     }
     if (!opts?.userName?.trim()) {
       throw new Error('请提供 userName');
     }
-    setCloudConfig({ url: opts.supabaseUrl, anonKey: opts.supabaseAnonKey });
+    setCloudConfig({ url, anonKey });
     initCloud();
     const state = await fetchRemoteState();
     cachedSeasonId = opts.seasonId ?? state?.currentSeasonId ?? 1;

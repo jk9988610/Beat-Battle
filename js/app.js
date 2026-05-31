@@ -10,7 +10,7 @@ import {
   exportSeasonData,
   importSeasonData,
 } from './storage.js';
-import { isCloudEnabled, getCloudConfig, setCloudConfig } from './config.js';
+import { isCloudEnabled, getCloudConfig, setCloudConfig, hasBuiltInCloudConfig } from './config.js';
 import {
   cloudActive,
   initCloud,
@@ -165,17 +165,22 @@ function sortByScore(items, getter) {
 function cloudSettingsHtml() {
   const cfg = getCloudConfig();
   const on = isCloudEnabled();
+  const builtIn = hasBuiltInCloudConfig();
   return `
     <div class="card cloud-card">
       <h2>云同步 <span class="sync-badge ${on ? 'on' : 'off'}">${on ? '已连接' : '未连接'}</span></h2>
-      <p class="hint">配置 Supabase 后，甲/乙/丙多端自动同步；编曲制作页可调用 SDK 直传，无需导出 JSON。</p>
-      <details ${on ? '' : 'open'}>
-        <summary>Supabase 配置</summary>
+      <p class="hint">${
+        builtIn
+          ? '已内置 Supabase 项目，打开页面即自动云端同步，无需再填 API。'
+          : '配置 Supabase 后，甲/乙/丙多端自动同步；编曲制作页可调用 SDK 直传。'
+      }</p>
+      <details ${builtIn && on ? '' : 'open'}>
+        <summary>${builtIn ? '更换云项目（一般不用改）' : 'Supabase 配置'}</summary>
         <div class="form-col">
           <label>Project URL <input type="url" id="sb-url" placeholder="https://xxx.supabase.co" value="${escapeHtml(cfg.url)}" /></label>
-          <label>anon public key <input type="password" id="sb-key" placeholder="eyJ..." value="${escapeHtml(cfg.anonKey)}" /></label>
+          <label>anon public key <input type="password" id="sb-key" placeholder="eyJ..." value="${escapeHtml(cfg.anonKey)}" autocomplete="off" /></label>
           <button type="button" class="btn primary" id="btn-save-cloud">保存并连接</button>
-          <a href="docs/integrate-production.md" class="link-doc" target="_blank" rel="noopener">制作页接入说明 →</a>
+          <a href="https://github.com/jk9988610/Beat-Battle/blob/main/docs/integrate-production.md" class="link-doc" target="_blank" rel="noopener">制作页接入说明 →</a>
         </div>
       </details>
     </div>`;
@@ -695,12 +700,20 @@ window.addEventListener('hashchange', () => {
 });
 
 async function bootstrap() {
-  if (isCloudEnabled()) initCloud();
-  state = await loadState();
-  ensureSeason(state, state.currentSeasonId);
   if (isCloudEnabled()) {
-    subscribeSeasonChanges(scheduleCloudReload);
+    initCloud();
+    try {
+      state = await loadState();
+      subscribeSeasonChanges(scheduleCloudReload);
+    } catch (err) {
+      console.error(err);
+      $('#app').innerHTML = `<div class="card empty-state"><p>云同步连接失败：${escapeHtml(err.message)}</p><p class="hint">请确认 Supabase 已执行 schema.sql 与 audio 存储桶。</p></div>`;
+      return;
+    }
+  } else {
+    state = await loadState();
   }
+  ensureSeason(state, state.currentSeasonId);
   if (!location.hash) setHash('home');
   render();
 }
