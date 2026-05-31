@@ -711,3 +711,21 @@ code {
   width: 100%;
   margin: 0;
 }
+
+.file-drop-secondary {
+  margin-top: 0.75rem;
+  border-style: dashed;
+  opacity: 0.95;
+}
+.tag {
+  display: inline-block;
+  font-size: 0.72rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 4px;
+  vertical-align: middle;
+  font-weight: 600;
+}
+.tag-json {
+  background: rgba(110, 181, 255, 0.2);
+  color: #9ecfff;
+}

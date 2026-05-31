@@ -2,7 +2,7 @@
  * 版本管理与在线更新（与 HarmonyForge 制作站机制一致）
  * 页面内嵌 meta 为「当前运行版本」；与远端 version.json 比较后显示更新按钮
  */
-let BUNDLED_VERSION = '1.9.3';
+let BUNDLED_VERSION = '1.9.4';
 let BUNDLED_BUILD = 'dev';
 
 let remoteVersion = null;

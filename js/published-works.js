@@ -7,6 +7,7 @@ import {
   copyAudioInCloud,
 } from './remote.js';
 import { formatSupabaseError } from './supabase-error.js';
+import { normalizeProjectJsonPayload } from './project-json-utils.js';
 
 let previewObjectUrl = null;
 
@@ -27,6 +28,8 @@ function mapRow(row) {
     audioPath,
     publishedAt: new Date(row.published_at).getTime(),
     audioUrl: getPublicAudioUrl(audioPath),
+    hasProjectJson: row.project_json != null,
+    projectJson: row.project_json ?? null,
   };
 }
 
@@ -36,14 +39,14 @@ export async function listPublishedWorks(userId) {
   if (!sb || !userId) return [];
   const { data, error } = await sb
     .from('published_works')
-    .select('*')
+    .select('id,user_id,user_name,title,audio_path,published_at,project_json')
     .eq('user_id', userId)
     .order('published_at', { ascending: false });
   if (error) throw new Error(formatSupabaseError(error));
   return (data || []).map(mapRow);
 }
 
-export async function publishWork({ userId, userName, title, audioBlob }) {
+export async function publishWork({ userId, userName, title, audioBlob, projectJson }) {
   await initCloudAsync();
   const sb = getClient();
   if (!sb) throw new Error('云同步未配置');
@@ -51,22 +54,26 @@ export async function publishWork({ userId, userName, title, audioBlob }) {
   if (!title?.trim()) throw new Error('请填写作品标题');
   if (!(audioBlob instanceof Blob)) throw new Error('audioBlob 必须是 Blob');
 
+  let jsonPayload = null;
+  if (projectJson != null) {
+    jsonPayload = normalizeProjectJsonPayload(projectJson);
+  }
+
   const workId = crypto.randomUUID();
   const ext = (audioBlob.type || 'audio/mpeg').split('/')[1]?.split(';')[0] || 'mp3';
   const audioPath = `published/${userId}/${workId}.${ext}`;
   await uploadAudioToCloud(audioPath, audioBlob);
 
-  const { data, error } = await sb
-    .from('published_works')
-    .insert({
-      id: workId,
-      user_id: userId,
-      user_name: userName.trim(),
-      title: title.trim(),
-      audio_path: audioPath,
-    })
-    .select()
-    .single();
+  const insertRow = {
+    id: workId,
+    user_id: userId,
+    user_name: userName.trim(),
+    title: title.trim(),
+    audio_path: audioPath,
+  };
+  if (jsonPayload) insertRow.project_json = jsonPayload;
+
+  const { data, error } = await sb.from('published_works').insert(insertRow).select().single();
   if (error) throw new Error(formatSupabaseError(error));
   return mapRow(data);
 }
@@ -109,16 +116,25 @@ export async function createSubmissionFromPublished(seasonId, userId, work) {
     finalPath = audioPath;
   }
 
-  const { data, error } = await sb
-    .from('submissions')
-    .insert({
-      id: subId,
-      season_id: Number(seasonId),
-      user_id: userId,
-      audio_path: finalPath,
-    })
-    .select()
-    .single();
+  const insertRow = {
+    id: subId,
+    season_id: Number(seasonId),
+    user_id: userId,
+    audio_path: finalPath,
+  };
+  if (work.projectJson) {
+    insertRow.project_json = work.projectJson;
+  } else if (work.hasProjectJson && work.id) {
+    const { data: row, error: fetchErr } = await sb
+      .from('published_works')
+      .select('project_json')
+      .eq('id', work.id)
+      .maybeSingle();
+    if (fetchErr) throw new Error(formatSupabaseError(fetchErr));
+    if (row?.project_json) insertRow.project_json = row.project_json;
+  }
+
+  const { data, error } = await sb.from('submissions').insert(insertRow).select().single();
 
   if (error) throw new Error(formatSupabaseError(error));
 
@@ -127,5 +143,6 @@ export async function createSubmissionFromPublished(seasonId, userId, work) {
     userId: data.user_id,
     audioId: data.audio_path,
     uploadedAt: new Date(data.uploaded_at).getTime(),
+    hasProjectJson: data.project_json != null,
   };
 }

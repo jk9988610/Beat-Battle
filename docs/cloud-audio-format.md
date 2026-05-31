@@ -14,15 +14,13 @@
 | 赛季参赛作品 | `{seasonId}/{submissionId}.mp3` |
 | 制作库发布 | `published/{userId}/{workId}.mp3` |
 
-## 能否上传 JSON？
+## 编曲工程 JSON
 
-- **评阅参赛作品**：当前仅支持 **音频文件** 参赛（盲听评阅）。
-- **制作库扩展（规划）**：可在 `published_works` 增加 `project_json`（jsonb）或 Storage 路径 `published/{userId}/{id}.json`，保存：
-  - 音序（steps、BPM、调性）
-  - 段落（sections）
-  - 轨道与音符（与 HarmonyForge 工程导出一致）
+- **制作库**（`published_works.project_json`）：编曲站发布到制作库时**自动附带**当前工程 bundle（HarmonyForge `.hfproj` 结构）。
+- **参赛作品**（`submissions.project_json`）：本地上传可选 `.json` / `.hfproj`；从制作库提交参赛时会一并复制工程 JSON。
+- **评阅**：盲听仍仅播放音频，工程 JSON 供存档与后续功能使用。
 
-编曲站导出 JSON + 混音 MP3 后，评阅站可「加载工程预览」；评阅打分仍用音频。需单独开发，数据库可先执行 `schema-v4-project-json.sql`（见仓库）。
+数据库：执行 `schema-v4-project-json.sql` 与 `schema-v5-submission-project-json.sql`。
 
 ## 平板 / 网页开发提示
 

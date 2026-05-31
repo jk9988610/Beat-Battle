@@ -70,6 +70,8 @@ export async function fetchRemoteStateRest() {
         userId: s.user_id,
         audioId: s.audio_path,
         uploadedAt: new Date(s.uploaded_at).getTime(),
+        hasProjectJson: s.project_json != null,
+        projectJson: s.project_json ?? null,
       };
     }
 

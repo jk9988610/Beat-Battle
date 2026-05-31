@@ -24,7 +24,8 @@
 
     // 从制作页导出：Blob / ArrayBuffer / MediaRecorder 结果均可
     const blob = await exportMyBeatAsWav(); // 你页面已有的导出函数
-    const { submissionId } = await BeatBattle.uploadAudio(blob);
+    const projectJson = buildYourProjectBundle(); // 与 .hfproj 导出结构一致
+    const { submissionId } = await BeatBattle.uploadAudio(blob, undefined, projectJson);
     alert('已提交到 Beat Battle，作品编号：' + submissionId.slice(0, 8));
   });
 </script>
@@ -44,3 +45,16 @@
 ## 5. 无云同步时
 
 未配置 Supabase 时，制作页仍只能走评阅站页内上传，或使用导出/导入 JSON（旧流程）。
+
+
+## 6. 制作库发布（含编曲 JSON）
+
+```javascript
+import { BeatBattle } from '.../beat-battle-sdk.js';
+await BeatBattle.init({ ... });
+await BeatBattle.publishWork({
+  userId, userName, title,
+  audioBlob,
+  projectJson: harmonyForgeBundle,
+});
+```

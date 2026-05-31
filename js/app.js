@@ -30,6 +30,7 @@ import {
   listPublishedWorks,
   createSubmissionFromPublished,
 } from './published-works.js';
+import { parseProjectJsonFile } from './project-json-utils.js';
 import {
   isLibraryPreviewLocked,
   shouldDeferUiRefresh,
@@ -75,6 +76,8 @@ let audioObjectUrl = null;
 let reloadTimer = null;
 let uploadMode = 'library';
 let publishedWorksCache = [];
+let uploadProjectJson = null;
+let uploadJsonLabel = '';
 let autoProgressTimer = null;
 
 const $ = (sel) => document.querySelector(sel);
@@ -528,7 +531,7 @@ function renderUpload() {
           (w) => `
         <li class="published-item" data-work-id="${w.id}">
           <div class="published-meta">
-            <strong>${escapeHtml(w.title)}</strong>
+            <strong>${escapeHtml(w.title)}</strong>${w.hasProjectJson ? ' <span class="tag tag-json">含编曲工程</span>' : ''}
             <span class="muted">${new Date(w.publishedAt).toLocaleString('zh-CN')}</span>
           </div>
           <div class="published-actions">
@@ -562,6 +565,11 @@ function renderUpload() {
           <span class="drop-text">点击或拖拽音频文件到此处</span>
           <span class="drop-hint">支持 wav、mp3、ogg、flac、m4a 等</span>
         </label>
+        <label class="file-drop file-drop-secondary" id="json-drop">
+          <input type="file" id="project-json-file" accept=".json,.hfproj,application/json" hidden />
+          <span class="drop-text json-drop-text">可选：附带 HarmonyForge 编曲工程（.json / .hfproj）</span>
+          <span class="drop-hint">与音频一并提交，便于赛后保留工程数据</span>
+        </label>
         <button type="submit" class="btn primary full" id="upload-btn" disabled>提交作品</button>
       </form>
     </div>
@@ -579,7 +587,7 @@ function renderUpload() {
       mySubs.length
         ? `<div class="card"><h2>我的提交</h2><ul class="sub-list">${mySubs
             .map(
-              (s) => `<li><span>作品 #${s.id.slice(0, 8)}</span><span class="muted">${new Date(s.uploadedAt).toLocaleString('zh-CN')}</span></li>`
+              (s) => `<li><span>作品 #${s.id.slice(0, 8)}${s.hasProjectJson || s.projectJson ? ' <span class="tag tag-json">含工程</span>' : ''}</span><span class="muted">${new Date(s.uploadedAt).toLocaleString('zh-CN')}</span></li>`
             )
             .join('')}</ul></div>`
         : ''
@@ -760,7 +768,7 @@ function updatePublishedListDom() {
       (w) => `
         <li class="published-item" data-work-id="${w.id}">
           <div class="published-meta">
-            <strong>${escapeHtml(w.title)}</strong>
+            <strong>${escapeHtml(w.title)}</strong>${w.hasProjectJson ? ' <span class="tag tag-json">含编曲工程</span>' : ''}
             <span class="muted">${new Date(w.publishedAt).toLocaleString('zh-CN')}</span>
           </div>
           <div class="published-actions">
@@ -848,6 +856,42 @@ function bindLibraryWorkDelegation() {
 }
 
 function bindUploadPageEvents() {
+  const jsonInput = $('#project-json-file');
+  const jsonDrop = $('#json-drop');
+  const jsonText = jsonDrop?.querySelector('.json-drop-text');
+
+  const onJsonFile = async (file) => {
+    if (!file) {
+      uploadProjectJson = null;
+      uploadJsonLabel = '';
+      if (jsonText) jsonText.textContent = '可选：附带 HarmonyForge 编曲工程（.json / .hfproj）';
+      return;
+    }
+    try {
+      uploadProjectJson = await parseProjectJsonFile(file);
+      uploadJsonLabel = file.name;
+      if (jsonText) jsonText.textContent = `已选择编曲工程：${file.name}`;
+    } catch (err) {
+      uploadProjectJson = null;
+      uploadJsonLabel = '';
+      alert(err.message || String(err));
+    }
+  };
+
+  jsonDrop?.addEventListener('click', () => jsonInput?.click());
+  jsonDrop?.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    jsonDrop.classList.add('dragover');
+  });
+  jsonDrop?.addEventListener('dragleave', () => jsonDrop.classList.remove('dragover'));
+  jsonDrop?.addEventListener('drop', (e) => {
+    e.preventDefault();
+    jsonDrop.classList.remove('dragover');
+    onJsonFile(e.dataTransfer.files[0]);
+  });
+  jsonInput?.addEventListener('change', () => onJsonFile(jsonInput.files[0]));
+
+
   const input = $('#audio-file');
   const drop = $('#file-drop');
   const btn = $('#upload-btn');
@@ -884,7 +928,9 @@ function bindUploadPageEvents() {
     btn.textContent = '上传中…';
     try {
       if (cloudActive()) {
-        await createSubmission(state.currentSeasonId, user.id, file);
+        await createSubmission(state.currentSeasonId, user.id, file, uploadProjectJson);
+        uploadProjectJson = null;
+        uploadJsonLabel = '';
         await reloadFromCloud();
         scheduleAutoProgress();
         setHash('upload');
@@ -898,7 +944,11 @@ function bindUploadPageEvents() {
           userId: user.id,
           audioId,
           uploadedAt: Date.now(),
+          hasProjectJson: !!uploadProjectJson,
+          projectJson: uploadProjectJson || null,
         };
+        uploadProjectJson = null;
+        uploadJsonLabel = '';
         persist();
         scheduleAutoProgress();
         setHash('upload');

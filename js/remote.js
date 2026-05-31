@@ -2,6 +2,7 @@ import { getCloudConfig, isCloudEnabled } from './config.js';
 import { averageScores } from './scoring.js';
 import { DEFAULT_SEASON_RULES, normalizeRules } from './season-rules.js';
 import { formatSupabaseError } from './supabase-error.js';
+import { normalizeProjectJsonPayload } from './project-json-utils.js';
 
 let client = null;
 let unsubscribe = null;
@@ -121,28 +122,29 @@ export async function downloadAudioFromCloud(path) {
   return data;
 }
 
-export async function createSubmission(seasonId, userId, blob) {
+export async function createSubmission(seasonId, userId, blob, projectJson = null) {
   const sb = await requireClient();
   const subId = crypto.randomUUID();
   const ext = (blob.type || 'audio/mpeg').split('/')[1]?.split(';')[0] || 'mp3';
   const audioPath = `${seasonId}/${subId}.${ext}`;
   await uploadAudioToCloud(audioPath, blob);
-  const { data, error } = await sb
-    .from('submissions')
-    .insert({
-      id: subId,
-      season_id: seasonId,
-      user_id: userId,
-      audio_path: audioPath,
-    })
-    .select()
-    .single();
+  const insertRow = {
+    id: subId,
+    season_id: seasonId,
+    user_id: userId,
+    audio_path: audioPath,
+  };
+  if (projectJson != null) {
+    insertRow.project_json = normalizeProjectJsonPayload(projectJson);
+  }
+  const { data, error } = await sb.from('submissions').insert(insertRow).select().single();
   if (error) throw new Error(formatSupabaseError(error));
   return {
     id: data.id,
     userId: data.user_id,
     audioId: data.audio_path,
     uploadedAt: new Date(data.uploaded_at).getTime(),
+    hasProjectJson: data.project_json != null,
   };
 }
 

@@ -64,7 +64,12 @@ export const BeatBattle = {
    * @param {Blob} audioBlob
    * @param {string} [mimeType]
    */
-  async uploadAudio(audioBlob, mimeType) {
+  /**
+   * @param {Blob} audioBlob
+   * @param {string} [mimeType]
+   * @param {object} [projectJson] HarmonyForge 工程 bundle 或 project 对象
+   */
+  async uploadAudio(audioBlob, mimeType, projectJson) {
     if (!this.isReady()) {
       throw new Error('请先调用 BeatBattle.init()');
     }
@@ -75,8 +80,14 @@ export const BeatBattle = {
       mimeType && !audioBlob.type
         ? new Blob([audioBlob], { type: mimeType })
         : audioBlob;
-    const sub = await createSubmission(cachedSeasonId, cachedUser.id, blob);
-    return { submissionId: sub.id, seasonId: cachedSeasonId };
+    const sub = await createSubmission(cachedSeasonId, cachedUser.id, blob, projectJson ?? null);
+    return { submissionId: sub.id, seasonId: cachedSeasonId, hasProjectJson: !!sub.hasProjectJson };
+  },
+
+  /** 发布到制作库（含编曲 JSON） */
+  async publishWork(opts) {
+    const { publishWork } = await import('./published-works.js');
+    return publishWork(opts);
   },
 
   /** 获取当前赛季 ID */
