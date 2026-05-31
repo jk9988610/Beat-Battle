@@ -646,3 +646,15 @@ code {
   margin-top: 1rem;
   width: 100%;
 }
+
+
+.bb-version-badge.has-update .bb-version-label {
+  color: #ffb347;
+  text-shadow: 0 0 8px rgba(255, 179, 71, 0.35);
+}
+
+#btn-update.has-update {
+  color: #ffb347;
+  border-color: rgba(255, 179, 71, 0.5);
+  box-shadow: 0 0 0 1px rgba(255, 179, 71, 0.35);
+}

@@ -1,5 +1,5 @@
 import { CRITERIA, CRITERIA_IDS, averageScores } from './scoring.js';
-import { loadVersionMeta, formatVersionLabel } from './version.js';
+import { loadVersionMeta, formatVersionLabel, initUpdateUI, syncVersionLabels } from './version.js';
 import { copyDebugInfo } from './debug.js';
 import {
   isAdmin,
@@ -557,13 +557,11 @@ function escapeHtml(s) {
 
 function updateVersionUI() {
   const label = formatVersionLabel();
+  syncVersionLabels();
   const ver = $('#nav-version');
-  const foot = $('#footer-version');
   if (ver) {
-    ver.textContent = label;
-    ver.title = `Beat Battle ${label}\n点击底部「复制调试信息」可发给开发者`;
+    ver.title = `Beat Battle ${label}\n有新版本时版本号会高亮，或点击「更新」`;
   }
-  if (foot) foot.textContent = label;
 }
 
 function render() {
@@ -872,6 +870,7 @@ async function bootstrap() {
   await loadVersionMeta();
   updateVersionUI();
   bindDebugCopy();
+  initUpdateUI();
   bindGlobalNav();
   if (isCloudEnabled()) {
     initCloud();

@@ -37,6 +37,15 @@ jobs:
             console.log('Stamped:', v.version, v.build);
           "
           cat version.json
+          node -e "
+            const fs = require('fs');
+            const v = JSON.parse(fs.readFileSync('version.json', 'utf8'));
+            let html = fs.readFileSync('index.html', 'utf8');
+            html = html.replace(/name=\"bb-app-version\" content=\"[^\"]*\"/, 'name=\"bb-app-version\" content=\"' + v.version + '\"');
+            html = html.replace(/name=\"bb-app-build\" content=\"[^\"]*\"/, 'name=\"bb-app-build\" content=\"' + v.build + '\"');
+            fs.writeFileSync('index.html', html);
+            console.log('Stamped index meta:', v.version, v.build);
+          "
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
