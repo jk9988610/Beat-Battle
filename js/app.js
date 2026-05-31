@@ -718,7 +718,6 @@ function render() {
   }
   const page = getPage();
   const navUser = currentUser();
-  const appEl = document.getElementById('app');
   updateVersionUI();
   $('#nav-season').textContent = `S${state.currentSeasonId}`;
   $('#nav-user').textContent = navUser
