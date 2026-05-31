@@ -464,3 +464,7 @@ code {
   color: var(--success);
   font-size: 0.8rem;
 }
+
+.admin-section.admin-active {
+  border-color: var(--success);
+}

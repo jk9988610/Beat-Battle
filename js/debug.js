@@ -1,6 +1,7 @@
 import { getVersionMeta } from './version.js';
 import { isCloudEnabled, getCloudConfig, hasBuiltInCloudConfig } from './config.js';
 import { cloudActive } from './remote.js';
+import { isAdmin, isAdminByName, hasAdminSession } from './admin.js';
 
 function maskKey(key) {
   if (!key || key.length < 12) return '(未配置)';
@@ -25,6 +26,13 @@ export function collectDebugInfo(state) {
       builtInConfig: hasBuiltInCloudConfig(),
       projectUrl: cfg.url || null,
       anonKeyPreview: maskKey(cfg.anonKey),
+    },
+    admin: {
+      isAdmin: isAdmin(state?.currentUserId ? state.users[state.currentUserId] : null),
+      adminByName: state?.currentUserId
+        ? isAdminByName(state.users[state.currentUserId]?.name)
+        : false,
+      pinSession: hasAdminSession(),
     },
     session: {
       currentUserId: state?.currentUserId ?? null,

@@ -2,6 +2,14 @@ import { CRITERIA, CRITERIA_IDS, averageScores } from './scoring.js';
 import { loadVersionMeta, formatVersionLabel } from './version.js';
 import { copyDebugInfo } from './debug.js';
 import {
+  isAdmin,
+  tryElevateWithPin,
+  revokeAdminSession,
+  assertAdmin,
+  getAdminHint,
+  isAdminByName,
+} from './admin.js';
+import {
   loadState,
   saveState,
   getCurrentSeason,
@@ -188,6 +196,52 @@ function cloudSettingsHtml() {
     </div>`;
 }
 
+
+function renderAdminPanel(user, season, cloudHint) {
+  const admin = user && isAdmin(user);
+  if (!user) {
+    return `
+    <div class="card admin-section">
+      <h2>活动管理</h2>
+      <p class="hint">加入赛季后，主持人可验证管理员身份以推进活动阶段。</p>
+    </div>`;
+  }
+  if (!admin) {
+    return `
+    <div class="card admin-section">
+      <h2>活动管理 <span class="sync-badge off">仅管理员</span></h2>
+      <p class="hint">${escapeHtml(getAdminHint())}</p>
+      <form id="admin-pin-form" class="form-row">
+        <input type="password" id="admin-pin" placeholder="管理员口令" autocomplete="off" />
+        <button type="submit" class="btn primary">验证</button>
+      </form>
+    </div>`;
+  }
+  return `
+    <div class="card admin-section admin-active">
+      <h2>活动管理 <span class="sync-badge on">管理员</span></h2>
+      <p class="hint">${cloudHint}</p>
+      <div class="admin-controls">
+        <select id="phase-select">
+          <option value="register" ${season.phase === 'register' ? 'selected' : ''}>报名中</option>
+          <option value="upload" ${season.phase === 'upload' ? 'selected' : ''}>上传作品</option>
+          <option value="review" ${season.phase === 'review' ? 'selected' : ''}>评阅中</option>
+          <option value="revealed" ${season.phase === 'revealed' ? 'selected' : ''}>已揭晓</option>
+        </select>
+        <button type="button" class="btn" id="btn-set-phase">更新阶段</button>
+        <button type="button" class="btn warn" id="btn-end-season">结束本赛季并开始下一季</button>
+        <button type="button" class="btn ghost btn-sm" id="btn-revoke-admin">退出管理</button>
+      </div>
+      <div class="import-export ${isCloudEnabled() ? 'muted-section' : ''}">
+        <button type="button" class="btn" id="btn-export">导出备份</button>
+        <label class="btn file-label">
+          导入合并
+          <input type="file" id="import-file" accept=".json,application/json" hidden />
+        </label>
+      </div>
+    </div>`;
+}
+
 function renderHome() {
   const user = currentUser();
   const season = getCurrentSeason(state);
@@ -242,27 +296,7 @@ function renderHome() {
         </a>
       </div>`
     }
-    <div class="card admin-section">
-      <h2>活动管理</h2>
-      <p class="hint">${cloudHint}</p>
-      <div class="admin-controls">
-        <select id="phase-select">
-          <option value="register" ${season.phase === 'register' ? 'selected' : ''}>报名中</option>
-          <option value="upload" ${season.phase === 'upload' ? 'selected' : ''}>上传作品</option>
-          <option value="review" ${season.phase === 'review' ? 'selected' : ''}>评阅中</option>
-          <option value="revealed" ${season.phase === 'revealed' ? 'selected' : ''}>已揭晓</option>
-        </select>
-        <button type="button" class="btn" id="btn-set-phase">更新阶段</button>
-        <button type="button" class="btn warn" id="btn-end-season">结束本赛季并开始下一季</button>
-      </div>
-      <div class="import-export ${isCloudEnabled() ? 'muted-section' : ''}">
-        <button type="button" class="btn" id="btn-export">导出备份</button>
-        <label class="btn file-label">
-          导入合并
-          <input type="file" id="import-file" accept=".json,application/json" hidden />
-        </label>
-      </div>
-    </div>
+    ${renderAdminPanel(user, season, cloudHint)}
   `;
 }
 
@@ -447,7 +481,9 @@ function render() {
   const navUser = currentUser();
   updateVersionUI();
   $('#nav-season').textContent = `S${state.currentSeasonId}`;
-  $('#nav-user').textContent = navUser ? navUser.name : '未登录';
+  $('#nav-user').textContent = navUser
+    ? navUser.name + (isAdmin(navUser) ? ' · 管理' : '')
+    : '未登录';
   const syncEl = $('#nav-sync');
   if (syncEl) syncEl.textContent = isCloudEnabled() ? '☁️' : '💾';
 
@@ -514,13 +550,36 @@ function bindPageEvents(page) {
       }
     });
 
+    $('#admin-pin-form')?.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const pin = $('#admin-pin')?.value;
+      if (tryElevateWithPin(pin)) {
+        alert('已通过管理员验证');
+        render();
+      } else {
+        alert('口令错误');
+      }
+    });
+
+    $('#btn-revoke-admin')?.addEventListener('click', () => {
+      revokeAdminSession();
+      render();
+    });
+
     $('#btn-switch-user')?.addEventListener('click', () => {
+      revokeAdminSession();
       state.currentUserId = null;
       setCurrentUserId(null);
       persist();
     });
 
     $('#btn-set-phase')?.addEventListener('click', async () => {
+      try {
+        assertAdmin(currentUser());
+      } catch (e) {
+        alert(e.message);
+        return;
+      }
       const phase = $('#phase-select').value;
       try {
         if (cloudActive()) {
@@ -539,6 +598,12 @@ function bindPageEvents(page) {
     });
 
     $('#btn-end-season')?.addEventListener('click', async () => {
+      try {
+        assertAdmin(currentUser());
+      } catch (e) {
+        alert(e.message);
+        return;
+      }
       if (!confirm('确定结束当前赛季？将归档并开启下一赛季。')) return;
       try {
         if (cloudActive()) {
