@@ -28,14 +28,15 @@ jobs:
         run: |
           SHA=$(git rev-parse --short HEAD)
           DATE=$(date -u +%Y%m%d-%H%M%S)
-          VERSION=$(node -e "console.log(require('./version.json').version)")
+          BUILD="${SHA}-${DATE}"
           node -e "
             const fs = require('fs');
-            const v = JSON.parse(fs.readFileSync('version.json','utf8'));
-            v.build = process.env.BUILD;
+            const v = JSON.parse(fs.readFileSync('version.json', 'utf8'));
+            v.build = '${BUILD}';
             fs.writeFileSync('version.json', JSON.stringify(v, null, 2) + '\n');
-          " BUILD="${SHA}-${DATE}"
-          echo "Deployed build: v${VERSION} · ${SHA}-${DATE}"
+            console.log('Stamped:', v.version, v.build);
+          "
+          cat version.json
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
