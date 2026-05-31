@@ -1,0 +1,23 @@
+  <dialog id="publishDialog" class="note-dialog publish-dialog">
+    <form method="dialog" id="publishForm">
+      <h3>发布到制作库</h3>
+      <label class="export-field">
+        <span>作品标题</span>
+        <input type="text" id="publishTitle" class="export-basename" placeholder="例如：主歌动机 A" required autocomplete="off">
+      </label>
+      <label class="export-field">
+        <span>参赛者昵称</span>
+        <input type="text" id="publishNickname" class="export-basename" placeholder="与评阅站一致" autocomplete="nickname">
+      </label>
+      <p class="note-dialog-hint export-hint">
+        需先在<a href="https://jk9988610.github.io/Beat-Battle/" target="_blank" rel="noopener">评阅站</a>用相同昵称加入赛季。
+        将同时上传 MP3 预览与完整编曲 JSON（.hfproj 结构），评阅站制作库可还原步进数据。
+        发布后可到评阅站「上传作品 → 制作库」试听并提交参赛。
+      </p>
+      <menu>
+        <button type="submit" value="cancel" class="btn btn-ghost">取消</button>
+        <button type="submit" value="ok" class="btn btn-sm" id="btnPublishConfirm">发布</button>
+      </menu>
+    </form>
+  </dialog>
+
