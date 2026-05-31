@@ -22,6 +22,8 @@ import {
   importSeasonData,
 } from './storage.js';
 import { isCloudEnabled, getCloudConfig, setCloudConfig, hasBuiltInCloudConfig } from './config.js';
+import { saveSession, clearSession, loadSession, MUSIC_PROD_URL } from './session.js';
+import { listPublishedWorks, createSubmissionFromPublished } from './published-works.js';
 import {
   cloudActive,
   initCloud,
@@ -37,6 +39,8 @@ import {
 let state = null;
 let audioObjectUrl = null;
 let reloadTimer = null;
+let uploadMode = 'local';
+let publishedWorksCache = [];
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -342,6 +346,11 @@ function renderHome() {
           <span class="tile-title">赛季排名</span>
           <span class="tile-desc">${season.phase === 'revealed' ? '姓名已揭晓' : '评阅结束后开放'}</span>
         </a>
+        <a href="${MUSIC_PROD_URL}" class="action-tile" target="_blank" rel="noopener">
+          <span class="tile-icon">🎹</span>
+          <span class="tile-title">前往编曲</span>
+          <span class="tile-desc">HarmonyForge 制作并发布到制作库</span>
+        </a>
       </div>`
     }
   `;
@@ -365,6 +374,24 @@ function renderUpload() {
     return redirectNotice('当前阶段不可上传', '#home');
   }
   const mySubs = submissionsForUser(user.id);
+  const cloudLibrary = isCloudEnabled();
+  const libraryItems = publishedWorksCache.length
+    ? publishedWorksCache
+        .map(
+          (w) => `
+        <li class="published-item" data-work-id="${w.id}">
+          <div class="published-meta">
+            <strong>${escapeHtml(w.title)}</strong>
+            <span class="muted">${new Date(w.publishedAt).toLocaleString('zh-CN')}</span>
+          </div>
+          <div class="published-actions">
+            <button type="button" class="btn ghost btn-sm btn-preview-work" data-work-id="${w.id}">试听</button>
+            <button type="button" class="btn primary btn-sm btn-submit-work" data-work-id="${w.id}">提交参赛</button>
+          </div>
+        </li>`
+        )
+        .join('')
+    : '<li class="muted published-empty">制作库暂无作品，请先在编曲站发布。</li>';
 
   return `
     <section class="page-header">
@@ -372,16 +399,35 @@ function renderUpload() {
       <h1>上传作品</h1>
       <p>评阅者<strong>不会</strong>看到文件名，仅通过播放打分。${isCloudEnabled() ? '已开启云同步，他人将自动看到新作品。' : ''}</p>
     </section>
-    <div class="card">
+    ${
+      cloudLibrary
+        ? `
+    <div class="upload-mode-tabs" role="tablist">
+      <button type="button" class="upload-tab ${uploadMode === 'local' ? 'active' : ''}" data-mode="local">本地上传</button>
+      <button type="button" class="upload-tab ${uploadMode === 'library' ? 'active' : ''}" data-mode="library">制作库</button>
+    </div>`
+        : ''
+    }
+    <div class="card upload-panel ${uploadMode === 'local' || !cloudLibrary ? '' : 'hidden'}" id="upload-panel-local">
       <form id="upload-form">
         <label class="file-drop" id="file-drop">
           <input type="file" id="audio-file" accept="audio/*" required hidden />
           <span class="drop-text">点击或拖拽音频文件到此处</span>
-          <span class="drop-hint">支持 wav、mp3、ogg、flac、m4a 等；制作页可用 SDK 直传</span>
+          <span class="drop-hint">支持 wav、mp3、ogg、flac、m4a 等</span>
         </label>
         <button type="submit" class="btn primary full" id="upload-btn" disabled>提交作品</button>
       </form>
     </div>
+    ${
+      cloudLibrary
+        ? `
+    <div class="card upload-panel ${uploadMode === 'library' ? '' : 'hidden'}" id="upload-panel-library">
+      <p class="hint">从 HarmonyForge 发布到制作库的作品可在此一键提交参赛。</p>
+      <ul class="published-list">${libraryItems}</ul>
+      <audio id="library-preview-player" controls class="audio-player library-preview" hidden></audio>
+    </div>`
+        : ''
+    }
     ${
       mySubs.length
         ? `<div class="card"><h2>我的提交</h2><ul class="sub-list">${mySubs
@@ -555,6 +601,127 @@ function render() {
   bindPageEvents(page);
 }
 
+
+async function refreshPublishedWorks() {
+  const user = currentUser();
+  if (!user || !isCloudEnabled()) {
+    publishedWorksCache = [];
+    return;
+  }
+  try {
+    publishedWorksCache = await listPublishedWorks(user.id);
+  } catch (err) {
+    console.error(err);
+    publishedWorksCache = [];
+  }
+}
+
+function bindUploadPageEvents() {
+  const input = $('#audio-file');
+  const drop = $('#file-drop');
+  const btn = $('#upload-btn');
+
+  const onFile = (file) => {
+    if (!file || !file.type.startsWith('audio/')) {
+      alert('请选择音频文件');
+      return;
+    }
+    input.files = createFileList(file);
+    drop.querySelector('.drop-text').textContent = '已选择文件（评阅者不会看到此名称）';
+    btn.disabled = false;
+  };
+
+  drop?.addEventListener('click', () => input?.click());
+  drop?.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    drop.classList.add('dragover');
+  });
+  drop?.addEventListener('dragleave', () => drop.classList.remove('dragover'));
+  drop?.addEventListener('drop', (e) => {
+    e.preventDefault();
+    drop.classList.remove('dragover');
+    onFile(e.dataTransfer.files[0]);
+  });
+  input?.addEventListener('change', () => onFile(input.files[0]));
+
+  $('#upload-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const user = currentUser();
+    const file = input.files[0];
+    if (!user || !file) return;
+    btn.disabled = true;
+    btn.textContent = '上传中…';
+    try {
+      if (cloudActive()) {
+        await createSubmission(state.currentSeasonId, user.id, file);
+        await reloadFromCloud();
+        setHash('upload');
+      } else {
+        const audioId = generateId();
+        await saveAudioBlob(audioId, file);
+        const season = getCurrentSeason(state);
+        const subId = generateId();
+        season.submissions[subId] = {
+          id: subId,
+          userId: user.id,
+          audioId,
+          uploadedAt: Date.now(),
+        };
+        persist();
+        setHash('upload');
+      }
+    } catch (err) {
+      alert('上传失败：' + err.message);
+      btn.disabled = false;
+      btn.textContent = '提交作品';
+    }
+  });
+
+  document.querySelectorAll('.upload-tab').forEach((tab) => {
+    tab.addEventListener('click', async () => {
+      uploadMode = tab.dataset.mode || 'local';
+      if (uploadMode === 'library') await refreshPublishedWorks();
+      render();
+    });
+  });
+
+  document.querySelectorAll('.btn-preview-work').forEach((el) => {
+    el.addEventListener('click', () => {
+      const work = publishedWorksCache.find((w) => w.id === el.dataset.workId);
+      const player = $('#library-preview-player');
+      if (!work?.audioUrl || !player) return;
+      player.hidden = false;
+      player.src = work.audioUrl;
+      player.load();
+      player.play().catch(() => {});
+    });
+  });
+
+  document.querySelectorAll('.btn-submit-work').forEach((el) => {
+    el.addEventListener('click', async () => {
+      const user = currentUser();
+      const work = publishedWorksCache.find((w) => w.id === el.dataset.workId);
+      if (!user || !work) return;
+      el.disabled = true;
+      const prev = el.textContent;
+      el.textContent = '提交中…';
+      try {
+        if (cloudActive()) {
+          await createSubmissionFromPublished(state.currentSeasonId, user.id, work);
+          await reloadFromCloud();
+          setHash('upload');
+        } else {
+          alert('请先配置云同步');
+        }
+      } catch (err) {
+        alert('提交失败：' + err.message);
+        el.disabled = false;
+        el.textContent = prev;
+      }
+    });
+  });
+}
+
 function bindPageEvents(page) {
   if (page === 'home' || !page) {
     $('#join-form')?.addEventListener('submit', async (e) => {
@@ -567,6 +734,7 @@ function bindPageEvents(page) {
           state.currentUserId = u.id;
           state.users[u.id] = { id: u.id, name: u.name, joinedAt: Date.now() };
           setCurrentUserId(u.id);
+          saveSession({ userId: u.id, userName: u.name });
           await reloadFromCloud();
         } else {
           let user = Object.values(state.users).find((u) => u.name === name);
@@ -575,6 +743,7 @@ function bindPageEvents(page) {
             state.users[user.id] = user;
           }
           state.currentUserId = user.id;
+          saveSession({ userId: user.id, userName: user.name });
           persist();
         }
       } catch (err) {
@@ -586,6 +755,7 @@ function bindPageEvents(page) {
       revokeAdminSession();
       state.currentUserId = null;
       setCurrentUserId(null);
+      clearSession();
       persist();
     });
 
@@ -604,65 +774,7 @@ function bindPageEvents(page) {
   }
 
   if (page === 'upload') {
-    const input = $('#audio-file');
-    const drop = $('#file-drop');
-    const btn = $('#upload-btn');
-
-    const onFile = (file) => {
-      if (!file || !file.type.startsWith('audio/')) {
-        alert('请选择音频文件');
-        return;
-      }
-      input.files = createFileList(file);
-      drop.querySelector('.drop-text').textContent = '已选择文件（评阅者不会看到此名称）';
-      btn.disabled = false;
-    };
-
-    drop?.addEventListener('click', () => input?.click());
-    drop?.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      drop.classList.add('dragover');
-    });
-    drop?.addEventListener('dragleave', () => drop.classList.remove('dragover'));
-    drop?.addEventListener('drop', (e) => {
-      e.preventDefault();
-      drop.classList.remove('dragover');
-      onFile(e.dataTransfer.files[0]);
-    });
-    input?.addEventListener('change', () => onFile(input.files[0]));
-
-    $('#upload-form')?.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const user = currentUser();
-      const file = input.files[0];
-      if (!user || !file) return;
-      btn.disabled = true;
-      btn.textContent = '上传中…';
-      try {
-        if (cloudActive()) {
-          await createSubmission(state.currentSeasonId, user.id, file);
-          await reloadFromCloud();
-          setHash('upload');
-        } else {
-          const audioId = generateId();
-          await saveAudioBlob(audioId, file);
-          const season = getCurrentSeason(state);
-          const subId = generateId();
-          season.submissions[subId] = {
-            id: subId,
-            userId: user.id,
-            audioId,
-            uploadedAt: Date.now(),
-          };
-          persist();
-          setHash('upload');
-        }
-      } catch (err) {
-        alert('上传失败：' + err.message);
-        btn.disabled = false;
-        btn.textContent = '提交作品';
-      }
-    });
+    bindUploadPageEvents();
   }
 
   if (page === 'review') {

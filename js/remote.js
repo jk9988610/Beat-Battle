@@ -219,3 +219,11 @@ export function setCurrentUserId(userId) {
   if (userId) localStorage.setItem('beat-battle-current-user-id', userId);
   else localStorage.removeItem('beat-battle-current-user-id');
 }
+
+export function getPublicAudioUrl(path) {
+  if (!path) return '';
+  const sb = getClient();
+  if (!sb) return '';
+  const { data } = sb.storage.from('audio').getPublicUrl(path);
+  return data?.publicUrl || '';
+}

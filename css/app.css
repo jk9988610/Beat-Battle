@@ -578,3 +578,71 @@ code {
 .settings-panel h3:first-child {
   margin-top: 0;
 }
+
+.upload-mode-tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.upload-tab {
+  padding: 0.45rem 1rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.upload-tab.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(124, 92, 255, 0.12);
+}
+
+.upload-panel.hidden {
+  display: none;
+}
+
+.published-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.published-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.published-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.published-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.published-empty {
+  padding: 0.5rem 0;
+}
+
+.library-preview {
+  margin-top: 1rem;
+  width: 100%;
+}
