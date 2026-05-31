@@ -6,7 +6,7 @@ import {
   getAdminSettings,
   setAdminSettings,
 } from './config.js';
-import { isAdmin, tryElevateWithPin, revokeAdminSession, assertAdmin, getAdminHint } from './admin.js';
+import { isAdmin, tryElevateWithPin, revokeAdminSession, getAdminHint } from './admin.js';
 import { initCloud } from './remote.js';
 
 function escapeHtml(s) {
@@ -15,130 +15,167 @@ function escapeHtml(s) {
   return d.innerHTML;
 }
 
+function settingsTabsHtml(activeTab) {
+  const tabs = [
+    { id: 'menu', label: '选项', hash: '#settings' },
+    { id: 'activity', label: '活动管理', hash: '#settings/activity' },
+    { id: 'admin', label: '管理员', hash: '#settings/admin' },
+    { id: 'cloud', label: '云同步', hash: '#settings/cloud' },
+  ];
+  return `
+    <nav class="settings-tabs" aria-label="设置分类">
+      ${tabs
+        .map(
+          (t) =>
+            `<a href="${t.hash}" class="settings-tab ${activeTab === t.id ? 'active' : ''}">${t.label}</a>`
+        )
+        .join('')}
+    </nav>`;
+}
+
 function renderActivityPanel(user, season, cloudHint) {
   const admin = user && isAdmin(user);
   if (!user) {
-    return `
-    <div class="card admin-section">
-      <h2>活动管理</h2>
-      <p class="hint">请先在主页加入本赛季，再验证管理员身份。</p>
-    </div>`;
+    return `<p class="hint">请先在主页加入本赛季，再验证管理员身份。</p>`;
   }
   if (!admin) {
     return `
-    <div class="card admin-section">
-      <h2>活动管理 <span class="sync-badge off">仅管理员</span></h2>
       <p class="hint">${escapeHtml(getAdminHint())}</p>
-    </div>`;
+      <a href="#settings/admin" class="btn primary">前往管理员验证</a>`;
   }
   return `
-    <div class="card admin-section admin-active">
-      <h2>活动管理 <span class="sync-badge on">管理员</span></h2>
-      <p class="hint">${cloudHint}</p>
-      <div class="admin-controls">
-        <select id="phase-select">
-          <option value="register" ${season.phase === 'register' ? 'selected' : ''}>报名中</option>
-          <option value="upload" ${season.phase === 'upload' ? 'selected' : ''}>上传作品</option>
-          <option value="review" ${season.phase === 'review' ? 'selected' : ''}>评阅中</option>
-          <option value="revealed" ${season.phase === 'revealed' ? 'selected' : ''}>已揭晓</option>
-        </select>
-        <button type="button" class="btn" id="btn-set-phase">更新阶段</button>
-        <button type="button" class="btn warn" id="btn-end-season">结束本赛季并开始下一季</button>
-      </div>
-      <div class="import-export ${isCloudEnabled() ? 'muted-section' : ''}">
-        <button type="button" class="btn" id="btn-export">导出备份</button>
-        <label class="btn file-label">
-          导入合并
-          <input type="file" id="import-file" accept=".json,application/json" hidden />
-        </label>
-      </div>
+    <p class="hint">${cloudHint}</p>
+    <div class="admin-controls">
+      <select id="phase-select">
+        <option value="register" ${season.phase === 'register' ? 'selected' : ''}>报名中</option>
+        <option value="upload" ${season.phase === 'upload' ? 'selected' : ''}>上传作品</option>
+        <option value="review" ${season.phase === 'review' ? 'selected' : ''}>评阅中</option>
+        <option value="revealed" ${season.phase === 'revealed' ? 'selected' : ''}>已揭晓</option>
+      </select>
+      <button type="button" class="btn" id="btn-set-phase">更新阶段</button>
+      <button type="button" class="btn warn" id="btn-end-season">结束本赛季并开始下一季</button>
+    </div>
+    <div class="import-export ${isCloudEnabled() ? 'muted-section' : ''}">
+      <button type="button" class="btn" id="btn-export">导出备份</button>
+      <label class="btn file-label">
+        导入合并
+        <input type="file" id="import-file" accept=".json,application/json" hidden />
+      </label>
     </div>`;
 }
 
-export function renderSettingsPage(user, season, cloudHint) {
-  const cfg = getCloudConfig();
-  const on = isCloudEnabled();
-  const builtIn = hasBuiltInCloudConfig();
+function renderSettingsMenu() {
+  return `
+    <div class="settings-menu">
+      <a href="#settings/activity" class="settings-option">
+        <span class="settings-option-title">活动管理</span>
+        <span class="settings-option-desc">推进赛季阶段、结束赛季、导入导出</span>
+      </a>
+      <a href="#settings/admin" class="settings-option">
+        <span class="settings-option-title">管理员</span>
+        <span class="settings-option-desc">验证身份、昵称白名单、口令</span>
+      </a>
+      <a href="#settings/cloud" class="settings-option">
+        <span class="settings-option-title">云同步</span>
+        <span class="settings-option-desc">Supabase 连接与制作页直传</span>
+      </a>
+    </div>`;
+}
+
+function renderAdminSection(user) {
   const admin = user && isAdmin(user);
   const adminCfg = getAdminSettings();
   const namesText = adminCfg.userNames.join('\n');
 
-  const adminSettingsBlock = admin
+  const identity = `
+    <h3>身份验证</h3>
+    <p class="hint">${
+      admin
+        ? '你当前已是管理员，可使用「活动管理」。'
+        : '输入口令后，本标签页获得管理权限（关闭页面后需重新验证）。'
+    }</p>
+    ${
+      admin
+        ? `<p class="admin-ok">✓ 已验证为管理员</p>`
+        : `<form id="admin-pin-form" class="form-row">
+      <input type="password" id="admin-pin" placeholder="管理员口令" autocomplete="off" />
+      <button type="submit" class="btn primary">验证</button>
+    </form>`
+    }`;
+
+  const config = admin
     ? `
-    <div class="card">
-      <h2>管理员设置</h2>
-      <p class="hint">保存到本浏览器。修改口令后请告知其他主持人。</p>
-      <form id="admin-settings-form" class="form-col">
-        <label>管理员昵称（每行一个，或用逗号分隔）
-          <textarea id="admin-names" rows="3" placeholder="管理员&#10;主持人">${escapeHtml(namesText)}</textarea>
-        </label>
-        <label>管理员口令
-          <input type="password" id="admin-pin-setting" value="${escapeHtml(adminCfg.pin)}" autocomplete="new-password" />
-        </label>
-        <button type="submit" class="btn primary">保存管理员设置</button>
-      </form>
-      <button type="button" class="btn ghost btn-sm" id="btn-revoke-admin">退出管理员身份</button>
-    </div>`
-    : `
-    <div class="card">
-      <h2>管理员设置 <span class="sync-badge off">需验证</span></h2>
-      <p class="hint">仅管理员可修改昵称白名单与口令。请先在上方验证身份。</p>
+    <h3>管理员设置</h3>
+    <form id="admin-settings-form" class="form-col">
+      <label>管理员昵称（每行一个，或用逗号分隔）
+        <textarea id="admin-names" rows="3">${escapeHtml(namesText)}</textarea>
+      </label>
+      <label>管理员口令
+        <input type="password" id="admin-pin-setting" value="${escapeHtml(adminCfg.pin)}" autocomplete="new-password" />
+      </label>
+      <button type="submit" class="btn primary">保存管理员设置</button>
+    </form>
+    <button type="button" class="btn ghost btn-sm" id="btn-revoke-admin">退出管理员身份</button>`
+    : `<p class="hint">验证后可修改昵称白名单与口令。</p>`;
+
+  return identity + config;
+}
+
+function renderCloudSection() {
+  const cfg = getCloudConfig();
+  const on = isCloudEnabled();
+  const builtIn = hasBuiltInCloudConfig();
+  return `
+    <p class="hint">${
+      builtIn ? '已内置 Supabase 项目，一般无需修改。' : '配置后多端自动同步。'
+    }</p>
+    <div class="form-col">
+      <label>Project URL <input type="url" id="sb-url" value="${escapeHtml(cfg.url)}" placeholder="https://xxx.supabase.co" /></label>
+      <label>anon public key <input type="password" id="sb-key" value="${escapeHtml(cfg.anonKey)}" autocomplete="off" /></label>
+      <button type="button" class="btn primary" id="btn-save-cloud">保存并连接</button>
+      <span class="sync-badge ${on ? 'on' : 'off'}">${on ? '已连接' : '未连接'}</span>
+      <a href="https://github.com/jk9988610/Beat-Battle/blob/main/docs/integrate-production.md" class="link-doc" target="_blank" rel="noopener">制作页接入说明 →</a>
     </div>`;
+}
+
+export function renderSettingsPage(user, season, cloudHint, tab) {
+  const activeTab = tab || 'menu';
+  const titles = {
+    menu: '设置',
+    activity: '活动管理',
+    admin: '管理员',
+    cloud: '云同步',
+  };
+
+  let body = '';
+  if (activeTab === 'menu') {
+    body = renderSettingsMenu();
+  } else if (activeTab === 'activity') {
+    body = renderActivityPanel(user, season, cloudHint);
+  } else if (activeTab === 'admin') {
+    body = renderAdminSection(user);
+  } else if (activeTab === 'cloud') {
+    body = renderCloudSection();
+  } else {
+    body = renderSettingsMenu();
+  }
 
   return `
     <section class="page-header">
-      <a href="#home" class="back">← 主页</a>
-      <h1>设置</h1>
+      <a href="${activeTab === 'menu' ? '#home' : '#settings'}" class="back">← ${activeTab === 'menu' ? '主页' : '设置'}</a>
+      <h1>${titles[activeTab] || '设置'}</h1>
     </section>
-
-    <div class="card">
-      <h2>管理员身份</h2>
-      <p class="hint">${
-        admin
-          ? '你当前已是管理员，可在下方「活动管理」推进赛季。'
-          : '输入口令后，本标签页获得管理权限（关闭页面后需重新验证）。'
-      }</p>
-      ${
-        admin
-          ? `<p class="admin-ok">✓ 已验证为管理员</p>`
-          : `<form id="admin-pin-form" class="form-row">
-        <input type="password" id="admin-pin" placeholder="管理员口令" autocomplete="off" />
-        <button type="submit" class="btn primary">验证</button>
-      </form>`
-      }
-    </div>
-
-    ${renderActivityPanel(user, season, cloudHint)}
-
-    ${adminSettingsBlock}
-
-    <div class="card cloud-card">
-      <h2>云同步 <span class="sync-badge ${on ? 'on' : 'off'}">${on ? '已连接' : '未连接'}</span></h2>
-      <p class="hint">${
-        builtIn
-          ? '已内置 Supabase 项目，一般无需修改。'
-          : '配置后甲/乙/丙可自动同步；编曲制作页可 SDK 直传。'
-      }</p>
-      <details ${builtIn && on ? '' : 'open'}>
-        <summary>${builtIn ? '更换云项目' : 'Supabase 配置'}</summary>
-        <div class="form-col">
-          <label>Project URL <input type="url" id="sb-url" value="${escapeHtml(cfg.url)}" placeholder="https://xxx.supabase.co" /></label>
-          <label>anon public key <input type="password" id="sb-key" value="${escapeHtml(cfg.anonKey)}" autocomplete="off" /></label>
-          <button type="button" class="btn primary" id="btn-save-cloud">保存并连接</button>
-          <a href="https://github.com/jk9988610/Beat-Battle/blob/main/docs/integrate-production.md" class="link-doc" target="_blank" rel="noopener">制作页接入说明 →</a>
-        </div>
-      </details>
-    </div>
+    ${settingsTabsHtml(activeTab)}
+    <div class="card settings-panel">${body}</div>
   `;
 }
 
 export function bindSettingsPageEvents(ctx) {
-  const { user, onReload, onRender, bindActivity } = ctx;
+  const { user, onReload, onRender, bindActivity, tab } = ctx;
 
   $('#admin-pin-form')?.addEventListener('submit', (e) => {
     e.preventDefault();
-    const pin = $('#admin-pin')?.value;
-    if (tryElevateWithPin(pin)) {
+    if (tryElevateWithPin($('#admin-pin')?.value)) {
       alert('已通过管理员验证');
       onRender();
     } else {
@@ -153,11 +190,12 @@ export function bindSettingsPageEvents(ctx) {
       return;
     }
     try {
-      const namesRaw = $('#admin-names').value;
-      const pin = $('#admin-pin-setting').value;
       setAdminSettings({
-        userNames: namesRaw.split(/[\n,，、]/).map((s) => s.trim()).filter(Boolean),
-        pin,
+        userNames: $('#admin-names')
+          .value.split(/[\n,，、]/)
+          .map((s) => s.trim())
+          .filter(Boolean),
+        pin: $('#admin-pin-setting').value,
       });
       alert('管理员设置已保存');
       onRender();
@@ -189,5 +227,5 @@ export function bindSettingsPageEvents(ctx) {
     }
   });
 
-  if (bindActivity) bindActivity();
+  if (tab === 'activity' && bindActivity) bindActivity();
 }

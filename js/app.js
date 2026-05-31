@@ -66,13 +66,28 @@ function currentUser() {
   return state?.currentUserId ? state.users[state.currentUserId] : null;
 }
 
-function setHash(page) {
-  location.hash = page;
+function setHash(route) {
+  const path = route.startsWith('#') ? route.slice(1) : route;
+  if (location.hash.replace(/^#/, '') === path) {
+    render();
+  } else {
+    location.hash = path;
+  }
+}
+
+function getRoute() {
+  const raw = (location.hash || '#home').replace(/^#/, '');
+  const segment = raw.split('?')[0];
+  const parts = segment.split('/').filter(Boolean);
+  return { page: parts[0] || 'home', tab: parts[1] || null };
 }
 
 function getPage() {
-  const h = (location.hash || '#home').slice(1);
-  return h.split('?')[0] || 'home';
+  return getRoute().page;
+}
+
+function getSettingsTab() {
+  return getRoute().tab || 'menu';
 }
 
 function revokeAudioUrl() {
@@ -178,8 +193,8 @@ function renderSettings() {
   const season = getCurrentSeason(state);
   const cloudHint = isCloudEnabled()
     ? '数据已云端同步，无需手动导入导出。'
-    : '未配置云同步时，多人需用下方导出/导入合并。';
-  return renderSettingsPage(user, season, cloudHint);
+    : '未配置云同步时，多人需用导出/导入合并。';
+  return renderSettingsPage(user, season, cloudHint, getSettingsTab());
 }
 
 function bindAdminActivityEvents() {
@@ -583,6 +598,7 @@ function bindPageEvents(page) {
       onReload: reloadFromCloud,
       onRender: render,
       bindActivity: bindAdminActivityEvents,
+      tab: getSettingsTab(),
     });
     if (isCloudEnabled()) subscribeSeasonChanges(scheduleCloudReload);
   }
@@ -725,10 +741,18 @@ function bindDebugCopy() {
   });
 }
 
+function bindGlobalNav() {
+  document.getElementById('nav-settings-btn')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    setHash('settings');
+  });
+}
+
 async function bootstrap() {
   await loadVersionMeta();
   updateVersionUI();
   bindDebugCopy();
+  bindGlobalNav();
   if (isCloudEnabled()) {
     initCloud();
     try {

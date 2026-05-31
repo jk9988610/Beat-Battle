@@ -509,3 +509,72 @@ code {
   font-size: 0.9rem;
   margin: 0;
 }
+
+.nav-settings-btn {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.settings-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 1rem;
+}
+
+.settings-tab {
+  padding: 0.4rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 0.85rem;
+}
+
+.settings-tab.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(124, 92, 255, 0.12);
+}
+
+.settings-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.settings-option {
+  display: block;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 0.15s;
+}
+
+.settings-option:hover {
+  border-color: var(--accent);
+}
+
+.settings-option-title {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+.settings-option-desc {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.settings-panel h3 {
+  margin: 1rem 0 0.5rem;
+  font-size: 1rem;
+}
+
+.settings-panel h3:first-child {
+  margin-top: 0;
+}
