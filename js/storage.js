@@ -6,6 +6,7 @@ import {
   uploadAudioToCloud,
 } from './remote.js';
 import { isCloudEnabled } from './config.js';
+import { withTimeout } from './async-utils.js';
 
 const DB_NAME = 'beat-battle-audio';
 const DB_VERSION = 1;
@@ -54,7 +55,7 @@ function defaultState() {
   };
 }
 
-function loadLocalState() {
+export function loadLocalState() {
   try {
     const raw = localStorage.getItem(LS_KEY);
     if (!raw) return defaultState();
@@ -69,15 +70,19 @@ function saveLocalState(state) {
 }
 
 export async function loadState() {
-  if (isCloudEnabled()) {
+  const local = loadLocalState();
+  if (!isCloudEnabled()) return local;
+  try {
     initCloud();
-    const remote = await fetchRemoteState();
+    const remote = await withTimeout(fetchRemoteState(), 12000, '云同步');
     if (remote) {
       saveLocalState(remote);
       return remote;
     }
+  } catch (err) {
+    console.warn('云同步失败，使用本地缓存', err);
   }
-  return loadLocalState();
+  return local;
 }
 
 export function saveState(state) {

@@ -1,5 +1,6 @@
 import { CRITERIA, CRITERIA_IDS, averageScores } from './scoring.js';
 import { loadVersionMeta, formatVersionLabel, initUpdateUI, syncVersionLabels } from './version.js';
+import { withTimeout } from './async-utils.js';
 import { copyDebugInfo } from './debug.js';
 import {
   isAdmin,
@@ -13,6 +14,7 @@ import {
 import { renderSettingsPage, bindSettingsPageEvents } from './settings-page.js';
 import {
   loadState,
+  loadLocalState,
   saveState,
   getCurrentSeason,
   ensureSeason,
@@ -1076,33 +1078,40 @@ function bindGlobalNav() {
   });
 }
 
+function initEarlyShell() {
+  bindDebugCopy();
+  bindLibraryPreviewLifecycle();
+  setLibraryPreviewUnlockHandler(flushPendingUiWork);
+  bindLibraryWorkDelegation();
+  initUpdateUI();
+  bindGlobalNav();
+}
+
 async function bootstrap() {
   stopLibraryPreview();
   const appEl = document.getElementById('app');
   if (appEl) appEl.innerHTML = '<div class="card empty-state"><p>加载中…</p></div>';
 
+  initEarlyShell();
+
   try {
-    await loadVersionMeta();
+    await withTimeout(loadVersionMeta(), 8000, '版本信息').catch(() => loadVersionMeta());
     updateVersionUI();
-    bindDebugCopy();
-    bindLibraryPreviewLifecycle();
-    setLibraryPreviewUnlockHandler(flushPendingUiWork);
-    bindLibraryWorkDelegation();
-    initUpdateUI();
-    bindGlobalNav();
 
-    if (isCloudEnabled()) {
-      initCloud();
-      state = await loadState();
-      subscribeSeasonChanges(scheduleCloudReload);
-    } else {
-      state = await loadState();
-    }
-
+    state = loadLocalState();
     ensureSeason(state, state.currentSeasonId);
     normalizeAllSeasons();
-
     if (!location.hash || location.hash === '#') location.hash = 'home';
+    safeRender();
+    window.__bbAppReady = true;
+
+    const loaded = await loadState();
+    state = loaded;
+    ensureSeason(state, state.currentSeasonId);
+    normalizeAllSeasons();
+    if (isCloudEnabled() && cloudActive()) {
+      subscribeSeasonChanges(scheduleCloudReload);
+    }
     safeRender();
 
     const bootUser = currentUser();
@@ -1118,7 +1127,9 @@ async function bootstrap() {
     scheduleAutoProgress();
   } catch (err) {
     showBootError(err);
+    window.__bbAppReady = true;
   }
 }
+
 
 window.addEventListener('load', bootstrap);

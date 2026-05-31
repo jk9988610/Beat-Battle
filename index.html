@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="bb-app-version" content="1.8.5" />
+    <meta name="bb-app-version" content="1.9.0" />
     <meta name="bb-app-build" content="dev" />
     <meta name="description" content="Beat Battle 音频盲评 — 上传、评阅、云端同步、赛季排名" />
     <title>Beat Battle · 音频评阅</title>
@@ -36,6 +36,40 @@
         class="audio-player library-preview"
       ></audio>
     </div>
+    <script>
+      window.__bbForceReload = function () {
+        var u = new URL(location.href);
+        u.searchParams.set('_', String(Date.now()));
+        if (typeof caches !== 'undefined') {
+          caches.keys().then(function (keys) {
+            return Promise.all(keys.map(function (k) { return caches.delete(k); }));
+          }).finally(function () { location.replace(u.toString()); });
+        } else {
+          location.replace(u.toString());
+        }
+      };
+      document.addEventListener('DOMContentLoaded', function () {
+        var btn = document.getElementById('btn-update');
+        if (btn) {
+          btn.addEventListener('click', function () {
+            setTimeout(function () {
+              if (!window.__bbAppReady && typeof window.__bbForceReload === 'function') {
+                window.__bbForceReload();
+              }
+            }, 600);
+          });
+        }
+        setTimeout(function () {
+          var app = document.getElementById('app');
+          if (app && /加载中/.test(app.textContent) && !window.__bbAppReady) {
+            app.innerHTML =
+              '<div class="card empty-state"><p>加载时间较长</p><p class="hint">可能是网络或脚本未响应。</p>' +
+              '<button type="button" class="btn primary" id="btn-stuck-reload">强制刷新</button></div>';
+            document.getElementById('btn-stuck-reload')?.addEventListener('click', window.__bbForceReload);
+          }
+        }, 15000);
+      });
+    </script>
     <script type="module" src="js/app.js"></script>
   </body>
 </html>

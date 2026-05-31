@@ -2,7 +2,7 @@
  * 版本管理与在线更新（与 HarmonyForge 制作站机制一致）
  * 页面内嵌 meta 为「当前运行版本」；与远端 version.json 比较后显示更新按钮
  */
-let BUNDLED_VERSION = '1.8.5';
+let BUNDLED_VERSION = '1.9.0';
 let BUNDLED_BUILD = 'dev';
 
 let remoteVersion = null;
@@ -172,6 +172,8 @@ export function initUpdateUI() {
   loadVersionMeta().catch(() => {});
 
   btn.addEventListener('click', async () => {
+    window.__bbUpdateHandled = true;
+    window.__bbAppReady = true;
     btn.disabled = true;
     const prev = btn.textContent;
     btn.textContent = '检测中…';
@@ -193,10 +195,12 @@ export function initUpdateUI() {
         );
         btn.textContent = prev;
       } else {
-        alert(`检查更新失败：${result.message || '未知错误'}`);
+        alert(`检查更新失败：${result.message || '未知错误'}\n将尝试强制刷新页面。`);
         btn.textContent = prev;
+        if (typeof window.__bbForceReload === 'function') window.__bbForceReload();
       }
     } finally {
+      window.__bbUpdateHandled = false;
       btn.disabled = false;
       if (btn.textContent === '检测中…' || btn.textContent === '更新中…') {
         btn.textContent = prev;
