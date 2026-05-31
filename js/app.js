@@ -173,51 +173,111 @@ function sortByScore(items, getter) {
   });
 }
 
-function renderAdminPanel(user, season, cloudHint) {
-  const admin = user && isAdmin(user);
-  if (!user) {
-    return `
-    <div class="card admin-section">
-      <h2>活动管理</h2>
-      <p class="hint">加入赛季后，主持人可验证管理员身份以推进活动阶段。</p>
-    </div>`;
-  }
-  if (!admin) {
-    return `
-    <div class="card admin-section">
-      <h2>活动管理 <span class="sync-badge off">仅管理员</span></h2>
-      <p class="hint">${escapeHtml(getAdminHint())}</p>
-      <a href="#settings" class="btn">前往设置验证</a>
-    </div>`;
-  }
-  return `
-    <div class="card admin-section admin-active">
-      <h2>活动管理 <span class="sync-badge on">管理员</span></h2>
-      <p class="hint">${cloudHint}</p>
-      <div class="admin-controls">
-        <select id="phase-select">
-          <option value="register" ${season.phase === 'register' ? 'selected' : ''}>报名中</option>
-          <option value="upload" ${season.phase === 'upload' ? 'selected' : ''}>上传作品</option>
-          <option value="review" ${season.phase === 'review' ? 'selected' : ''}>评阅中</option>
-          <option value="revealed" ${season.phase === 'revealed' ? 'selected' : ''}>已揭晓</option>
-        </select>
-        <button type="button" class="btn" id="btn-set-phase">更新阶段</button>
-        <button type="button" class="btn warn" id="btn-end-season">结束本赛季并开始下一季</button>
-      </div>
-      <div class="import-export ${isCloudEnabled() ? 'muted-section' : ''}">
-        <button type="button" class="btn" id="btn-export">导出备份</button>
-        <label class="btn file-label">
-          导入合并
-          <input type="file" id="import-file" accept=".json,application/json" hidden />
-        </label>
-      </div>
-    </div>`;
-}
-
-
 function renderSettings() {
   const user = currentUser();
-  return renderSettingsPage(user);
+  const season = getCurrentSeason(state);
+  const cloudHint = isCloudEnabled()
+    ? '数据已云端同步，无需手动导入导出。'
+    : '未配置云同步时，多人需用下方导出/导入合并。';
+  return renderSettingsPage(user, season, cloudHint);
+}
+
+function bindAdminActivityEvents() {
+  $('#btn-set-phase')?.addEventListener('click', async () => {
+    try {
+      assertAdmin(currentUser());
+    } catch (e) {
+      alert(e.message);
+      return;
+    }
+    const phase = $('#phase-select').value;
+    try {
+      if (cloudActive()) {
+        await updateSeasonPhase(state.currentSeasonId, phase);
+        await reloadFromCloud();
+        render();
+      } else {
+        const season = getCurrentSeason(state);
+        season.phase = phase;
+        state.phase = phase;
+        if (phase === 'revealed' && !season.endedAt) season.endedAt = Date.now();
+        persist();
+      }
+    } catch (err) {
+      alert('更新失败：' + err.message);
+    }
+  });
+
+  $('#btn-end-season')?.addEventListener('click', async () => {
+    try {
+      assertAdmin(currentUser());
+    } catch (e) {
+      alert(e.message);
+      return;
+    }
+    if (!confirm('确定结束当前赛季？将归档并开启下一赛季。')) return;
+    try {
+      if (cloudActive()) {
+        const nextId = await startNewSeason(state.currentSeasonId);
+        state.currentSeasonId = nextId;
+        await reloadFromCloud();
+        render();
+      } else {
+        const season = getCurrentSeason(state);
+        season.phase = 'revealed';
+        season.endedAt = Date.now();
+        state.currentSeasonId += 1;
+        ensureSeason(state, state.currentSeasonId);
+        getCurrentSeason(state).phase = 'register';
+        state.phase = 'register';
+        persist();
+      }
+    } catch (err) {
+      alert('操作失败：' + err.message);
+    }
+  });
+
+  $('#btn-export')?.addEventListener('click', async () => {
+    try {
+      assertAdmin(currentUser());
+    } catch (e) {
+      alert(e.message);
+      return;
+    }
+    try {
+      const data = await exportSeasonData(state, state.currentSeasonId);
+      const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `beat-battle-s${state.currentSeasonId}-${Date.now()}.json`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch (err) {
+      alert('导出失败：' + err.message);
+    }
+  });
+
+  $('#import-file')?.addEventListener('change', async (e) => {
+    try {
+      assertAdmin(currentUser());
+    } catch (err) {
+      alert(err.message);
+      e.target.value = '';
+      return;
+    }
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const payload = JSON.parse(await file.text());
+      state = await importSeasonData(state, payload);
+      if (payload.season?.id) state.currentSeasonId = payload.season.id;
+      persist();
+      alert('数据已合并导入');
+    } catch (err) {
+      alert('导入失败：' + err.message);
+    }
+    e.target.value = '';
+  });
 }
 
 function renderHome() {
@@ -226,10 +286,6 @@ function renderHome() {
   const mySubs = user ? submissionsForUser(user.id) : [];
   const pending = user ? reviewableSubmissions(user.id).length : 0;
   const reviewed = user ? reviewsByUser(user.id).length : 0;
-  const cloudHint = isCloudEnabled()
-    ? '数据已云端同步，无需手动导入导出。'
-    : '未配置云同步时，多人需用下方导出/导入合并；建议配置 Supabase。';
-
   return `
     <section class="hero">
       <h1>Beat Battle 音频评阅</h1>
@@ -273,7 +329,6 @@ function renderHome() {
         </a>
       </div>`
     }
-    ${renderAdminPanel(user, season, cloudHint)}
   `;
 }
 
@@ -519,86 +574,6 @@ function bindPageEvents(page) {
       persist();
     });
 
-    $('#btn-set-phase')?.addEventListener('click', async () => {
-      try {
-        assertAdmin(currentUser());
-      } catch (e) {
-        alert(e.message);
-        return;
-      }
-      const phase = $('#phase-select').value;
-      try {
-        if (cloudActive()) {
-          await updateSeasonPhase(state.currentSeasonId, phase);
-          await reloadFromCloud();
-        } else {
-          const season = getCurrentSeason(state);
-          season.phase = phase;
-          state.phase = phase;
-          if (phase === 'revealed' && !season.endedAt) season.endedAt = Date.now();
-          persist();
-        }
-      } catch (err) {
-        alert('更新失败：' + err.message);
-      }
-    });
-
-    $('#btn-end-season')?.addEventListener('click', async () => {
-      try {
-        assertAdmin(currentUser());
-      } catch (e) {
-        alert(e.message);
-        return;
-      }
-      if (!confirm('确定结束当前赛季？将归档并开启下一赛季。')) return;
-      try {
-        if (cloudActive()) {
-          const nextId = await startNewSeason(state.currentSeasonId);
-          state.currentSeasonId = nextId;
-          await reloadFromCloud();
-        } else {
-          const season = getCurrentSeason(state);
-          season.phase = 'revealed';
-          season.endedAt = Date.now();
-          state.currentSeasonId += 1;
-          ensureSeason(state, state.currentSeasonId);
-          getCurrentSeason(state).phase = 'register';
-          state.phase = 'register';
-          persist();
-        }
-      } catch (err) {
-        alert('操作失败：' + err.message);
-      }
-    });
-
-    $('#btn-export')?.addEventListener('click', async () => {
-      try {
-        const data = await exportSeasonData(state, state.currentSeasonId);
-        const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = `beat-battle-s${state.currentSeasonId}-${Date.now()}.json`;
-        a.click();
-        URL.revokeObjectURL(a.href);
-      } catch (err) {
-        alert('导出失败：' + err.message);
-      }
-    });
-
-    $('#import-file')?.addEventListener('change', async (e) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
-      try {
-        const payload = JSON.parse(await file.text());
-        state = await importSeasonData(state, payload);
-        if (payload.season?.id) state.currentSeasonId = payload.season.id;
-        persist();
-        alert('数据已合并导入');
-      } catch (err) {
-        alert('导入失败：' + err.message);
-      }
-      e.target.value = '';
-    });
   }
 
 
@@ -607,6 +582,7 @@ function bindPageEvents(page) {
       user: currentUser(),
       onReload: reloadFromCloud,
       onRender: render,
+      bindActivity: bindAdminActivityEvents,
     });
     if (isCloudEnabled()) subscribeSeasonChanges(scheduleCloudReload);
   }

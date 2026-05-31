@@ -6,7 +6,7 @@ import {
   getAdminSettings,
   setAdminSettings,
 } from './config.js';
-import { isAdmin, tryElevateWithPin, revokeAdminSession } from './admin.js';
+import { isAdmin, tryElevateWithPin, revokeAdminSession, assertAdmin, getAdminHint } from './admin.js';
 import { initCloud } from './remote.js';
 
 function escapeHtml(s) {
@@ -15,7 +15,47 @@ function escapeHtml(s) {
   return d.innerHTML;
 }
 
-export function renderSettingsPage(user) {
+function renderActivityPanel(user, season, cloudHint) {
+  const admin = user && isAdmin(user);
+  if (!user) {
+    return `
+    <div class="card admin-section">
+      <h2>活动管理</h2>
+      <p class="hint">请先在主页加入本赛季，再验证管理员身份。</p>
+    </div>`;
+  }
+  if (!admin) {
+    return `
+    <div class="card admin-section">
+      <h2>活动管理 <span class="sync-badge off">仅管理员</span></h2>
+      <p class="hint">${escapeHtml(getAdminHint())}</p>
+    </div>`;
+  }
+  return `
+    <div class="card admin-section admin-active">
+      <h2>活动管理 <span class="sync-badge on">管理员</span></h2>
+      <p class="hint">${cloudHint}</p>
+      <div class="admin-controls">
+        <select id="phase-select">
+          <option value="register" ${season.phase === 'register' ? 'selected' : ''}>报名中</option>
+          <option value="upload" ${season.phase === 'upload' ? 'selected' : ''}>上传作品</option>
+          <option value="review" ${season.phase === 'review' ? 'selected' : ''}>评阅中</option>
+          <option value="revealed" ${season.phase === 'revealed' ? 'selected' : ''}>已揭晓</option>
+        </select>
+        <button type="button" class="btn" id="btn-set-phase">更新阶段</button>
+        <button type="button" class="btn warn" id="btn-end-season">结束本赛季并开始下一季</button>
+      </div>
+      <div class="import-export ${isCloudEnabled() ? 'muted-section' : ''}">
+        <button type="button" class="btn" id="btn-export">导出备份</button>
+        <label class="btn file-label">
+          导入合并
+          <input type="file" id="import-file" accept=".json,application/json" hidden />
+        </label>
+      </div>
+    </div>`;
+}
+
+export function renderSettingsPage(user, season, cloudHint) {
   const cfg = getCloudConfig();
   const on = isCloudEnabled();
   const builtIn = hasBuiltInCloudConfig();
@@ -27,7 +67,7 @@ export function renderSettingsPage(user) {
     ? `
     <div class="card">
       <h2>管理员设置</h2>
-      <p class="hint">保存到本浏览器，所有使用此设备访问的用户将沿用该配置。云端同步的活动仍依赖各端本地此项配置。</p>
+      <p class="hint">保存到本浏览器。修改口令后请告知其他主持人。</p>
       <form id="admin-settings-form" class="form-col">
         <label>管理员昵称（每行一个，或用逗号分隔）
           <textarea id="admin-names" rows="3" placeholder="管理员&#10;主持人">${escapeHtml(namesText)}</textarea>
@@ -42,7 +82,7 @@ export function renderSettingsPage(user) {
     : `
     <div class="card">
       <h2>管理员设置 <span class="sync-badge off">需验证</span></h2>
-      <p class="hint">仅管理员可修改昵称白名单与口令。请先在下方验证身份。</p>
+      <p class="hint">仅管理员可修改昵称白名单与口令。请先在上方验证身份。</p>
     </div>`;
 
   return `
@@ -55,7 +95,7 @@ export function renderSettingsPage(user) {
       <h2>管理员身份</h2>
       <p class="hint">${
         admin
-          ? '你当前已是管理员，可修改下方「管理员设置」并返回主页管理活动。'
+          ? '你当前已是管理员，可在下方「活动管理」推进赛季。'
           : '输入口令后，本标签页获得管理权限（关闭页面后需重新验证）。'
       }</p>
       ${
@@ -67,6 +107,8 @@ export function renderSettingsPage(user) {
       </form>`
       }
     </div>
+
+    ${renderActivityPanel(user, season, cloudHint)}
 
     ${adminSettingsBlock}
 
@@ -91,7 +133,7 @@ export function renderSettingsPage(user) {
 }
 
 export function bindSettingsPageEvents(ctx) {
-  const { user, onReload, onRender } = ctx;
+  const { user, onReload, onRender, bindActivity } = ctx;
 
   $('#admin-pin-form')?.addEventListener('submit', (e) => {
     e.preventDefault();
@@ -146,4 +188,6 @@ export function bindSettingsPageEvents(ctx) {
       alert('连接失败：' + err.message);
     }
   });
+
+  if (bindActivity) bindActivity();
 }

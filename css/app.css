@@ -29,9 +29,10 @@ body {
 }
 
 .top-nav {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr auto auto;
   align-items: center;
-  justify-content: space-between;
+  gap: 0.5rem;
   padding: 0.75rem 1.25rem;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
@@ -40,10 +41,33 @@ body {
   z-index: 100;
 }
 
-.top-nav a {
+.nav-brand {
   color: var(--text);
   text-decoration: none;
   font-weight: 600;
+  justify-self: start;
+}
+
+.nav-settings-btn {
+  justify-self: center;
+  padding: 0.35rem 0.85rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+  text-decoration: none;
+  font-size: 0.9rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.nav-settings-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.top-nav .nav-meta {
+  justify-self: end;
 }
 
 .nav-meta {
@@ -467,17 +491,6 @@ code {
 
 .admin-section.admin-active {
   border-color: var(--success);
-}
-
-.nav-settings {
-  text-decoration: none;
-  font-size: 1.1rem;
-  line-height: 1;
-  padding: 0.15rem 0.35rem;
-  border-radius: 6px;
-}
-.nav-settings:hover {
-  background: var(--surface2);
 }
 
 .form-col textarea {
