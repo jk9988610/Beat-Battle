@@ -24,7 +24,12 @@ import {
 } from './storage.js';
 import { isCloudEnabled, getCloudConfig, setCloudConfig, hasBuiltInCloudConfig } from './config.js';
 import { saveSession, clearSession, loadSession, MUSIC_PROD_URL } from './session.js';
-import { listPublishedWorks, createSubmissionFromPublished } from './published-works.js';
+import {
+  listPublishedWorks,
+  createSubmissionFromPublished,
+  resolveWorkPreviewUrl,
+  revokeWorkPreviewUrl,
+} from './published-works.js';
 import {
   normalizeSeason,
   formatSeasonProgressHtml,
@@ -506,7 +511,7 @@ function renderUpload() {
     <div class="card upload-panel ${uploadMode === 'library' ? '' : 'hidden'}" id="upload-panel-library">
       <p class="hint">从 HarmonyForge 发布到制作库的作品可在此一键提交参赛。</p>
       <ul class="published-list">${libraryItems}</ul>
-      <audio id="library-preview-player" controls class="audio-player library-preview" hidden></audio>
+      <audio id="library-preview-player" controls playsinline webkit-playsinline class="audio-player library-preview" hidden></audio>
     </div>`
         : ''
     }
@@ -768,14 +773,32 @@ function bindUploadPageEvents() {
   });
 
   document.querySelectorAll('.btn-preview-work').forEach((el) => {
-    el.addEventListener('click', () => {
+    el.addEventListener('click', async () => {
       const work = publishedWorksCache.find((w) => w.id === el.dataset.workId);
       const player = $('#library-preview-player');
-      if (!work?.audioUrl || !player) return;
-      player.hidden = false;
-      player.src = work.audioUrl;
-      player.load();
-      player.play().catch(() => {});
+      if (!work || !player) {
+        alert('无法加载作品信息');
+        return;
+      }
+      const prevLabel = el.textContent;
+      el.disabled = true;
+      el.textContent = '加载中…';
+      try {
+        const { url, error } = await resolveWorkPreviewUrl(work);
+        if (!url) {
+          alert(error || '试听失败：无法获取音频地址');
+          return;
+        }
+        player.hidden = false;
+        player.src = url;
+        player.load();
+        await player.play();
+      } catch (err) {
+        alert('试听失败：' + (err.message || err));
+      } finally {
+        el.disabled = false;
+        el.textContent = prevLabel;
+      }
     });
   });
 
@@ -790,9 +813,15 @@ function bindUploadPageEvents() {
       try {
         if (cloudActive()) {
           await createSubmissionFromPublished(state.currentSeasonId, user.id, work);
-          await reloadFromCloud();
+          try {
+            await reloadFromCloud();
+          } catch (reloadErr) {
+            console.error(reloadErr);
+            alert('作品已提交，但刷新列表失败：' + reloadErr.message + '\n请点底部「更新」后查看主页');
+          }
           scheduleAutoProgress();
-          setHash('upload');
+          setHash('home');
+          alert('提交成功！可在主页查看「已上传」数量');
         } else {
           alert('请先配置云同步');
         }
@@ -932,6 +961,7 @@ function createFileList(file) {
 
 window.addEventListener('hashchange', () => {
   revokeAudioUrl();
+  revokeWorkPreviewUrl();
   render();
 });
 

@@ -2,6 +2,7 @@ import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 import { getCloudConfig, isCloudEnabled } from './config.js';
 import { averageScores } from './scoring.js';
 import { DEFAULT_SEASON_RULES, normalizeRules } from './season-rules.js';
+import { formatSupabaseError } from './supabase-error.js';
 
 let client = null;
 let unsubscribe = null;
@@ -130,14 +131,21 @@ export async function uploadAudioToCloud(path, blob) {
     upsert: true,
     contentType: blob.type || 'audio/mpeg',
   });
-  if (error) throw error;
+  if (error) throw new Error(formatSupabaseError(error));
   return path;
+}
+
+export async function copyAudioInCloud(fromPath, toPath) {
+  const sb = getClient();
+  const { error } = await sb.storage.from('audio').copy(fromPath, toPath);
+  if (error) throw error;
+  return toPath;
 }
 
 export async function downloadAudioFromCloud(path) {
   const sb = getClient();
   const { data, error } = await sb.storage.from('audio').download(path);
-  if (error) throw error;
+  if (error) throw new Error(formatSupabaseError(error));
   return data;
 }
 
@@ -157,7 +165,7 @@ export async function createSubmission(seasonId, userId, blob) {
     })
     .select()
     .single();
-  if (error) throw error;
+  if (error) throw new Error(formatSupabaseError(error));
   return {
     id: data.id,
     userId: data.user_id,
@@ -206,19 +214,26 @@ export async function updateSeasonRulesRemote(seasonId, rules) {
 
 export async function joinSeasonParticipantRemote(seasonId, userId) {
   const sb = getClient();
-  const { data: row, error: fetchErr } = await sb
-    .from('seasons')
-    .select('participant_ids')
-    .eq('id', seasonId)
-    .single();
-  if (fetchErr) throw fetchErr;
-  const ids = new Set(row?.participant_ids || []);
-  ids.add(userId);
-  const { error } = await sb
-    .from('seasons')
-    .update({ participant_ids: [...ids] })
-    .eq('id', seasonId);
-  if (error) throw error;
+  try {
+    const { data: row, error: fetchErr } = await sb
+      .from('seasons')
+      .select('participant_ids')
+      .eq('id', seasonId)
+      .single();
+    if (fetchErr) {
+      if (fetchErr.message?.includes('participant_ids')) return;
+      throw fetchErr;
+    }
+    const ids = new Set(row?.participant_ids || []);
+    ids.add(userId);
+    const { error } = await sb
+      .from('seasons')
+      .update({ participant_ids: [...ids] })
+      .eq('id', seasonId);
+    if (error && !error.message?.includes('participant_ids')) throw error;
+  } catch (err) {
+    console.warn('joinSeasonParticipantRemote', err);
+  }
 }
 
 export async function startNewSeason(currentSeasonId) {
