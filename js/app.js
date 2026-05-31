@@ -10,9 +10,22 @@ import {
   exportSeasonData,
   importSeasonData,
 } from './storage.js';
+import { isCloudEnabled, getCloudConfig, setCloudConfig } from './config.js';
+import {
+  cloudActive,
+  initCloud,
+  findOrCreateUser,
+  createSubmission,
+  createReview,
+  updateSeasonPhase,
+  startNewSeason,
+  subscribeSeasonChanges,
+  setCurrentUserId,
+} from './remote.js';
 
-let state = loadState();
+let state = null;
 let audioObjectUrl = null;
+let reloadTimer = null;
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -27,8 +40,19 @@ function persist() {
   render();
 }
 
+async function reloadFromCloud() {
+  if (!isCloudEnabled()) return;
+  state = await loadState();
+  render();
+}
+
+function scheduleCloudReload() {
+  clearTimeout(reloadTimer);
+  reloadTimer = setTimeout(() => reloadFromCloud(), 400);
+}
+
 function currentUser() {
-  return state.currentUserId ? state.users[state.currentUserId] : null;
+  return state?.currentUserId ? state.users[state.currentUserId] : null;
 }
 
 function setHash(page) {
@@ -54,7 +78,7 @@ async function playSubmission(submissionId) {
   if (!sub) return;
   const blob = await getAudioBlob(sub.audioId);
   if (!blob) {
-    alert('音频数据丢失，请重新上传或导入数据包。');
+    alert('音频加载失败，请检查网络或云同步配置。');
     return;
   }
   audioObjectUrl = URL.createObjectURL(blob);
@@ -122,13 +146,8 @@ function computeRankings(season) {
     const valid = CRITERIA_IDS.map((id) => criterionAvgs[id]).filter((v) => v != null);
     const totalAvg =
       valid.length > 0 ? valid.reduce((a, b) => a + b, 0) / valid.length : null;
-    results.push({
-      ...entry,
-      criterionAvgs,
-      totalAvg,
-    });
+    results.push({ ...entry, criterionAvgs, totalAvg });
   }
-
   return results;
 }
 
@@ -143,7 +162,24 @@ function sortByScore(items, getter) {
   });
 }
 
-// ——— 页面渲染 ———
+function cloudSettingsHtml() {
+  const cfg = getCloudConfig();
+  const on = isCloudEnabled();
+  return `
+    <div class="card cloud-card">
+      <h2>云同步 <span class="sync-badge ${on ? 'on' : 'off'}">${on ? '已连接' : '未连接'}</span></h2>
+      <p class="hint">配置 Supabase 后，甲/乙/丙多端自动同步；编曲制作页可调用 SDK 直传，无需导出 JSON。</p>
+      <details ${on ? '' : 'open'}>
+        <summary>Supabase 配置</summary>
+        <div class="form-col">
+          <label>Project URL <input type="url" id="sb-url" placeholder="https://xxx.supabase.co" value="${escapeHtml(cfg.url)}" /></label>
+          <label>anon public key <input type="password" id="sb-key" placeholder="eyJ..." value="${escapeHtml(cfg.anonKey)}" /></label>
+          <button type="button" class="btn primary" id="btn-save-cloud">保存并连接</button>
+          <a href="docs/integrate-production.md" class="link-doc" target="_blank" rel="noopener">制作页接入说明 →</a>
+        </div>
+      </details>
+    </div>`;
+}
 
 function renderHome() {
   const user = currentUser();
@@ -151,22 +187,26 @@ function renderHome() {
   const mySubs = user ? submissionsForUser(user.id) : [];
   const pending = user ? reviewableSubmissions(user.id).length : 0;
   const reviewed = user ? reviewsByUser(user.id).length : 0;
+  const cloudHint = isCloudEnabled()
+    ? '数据已云端同步，无需手动导入导出。'
+    : '未配置云同步时，多人需用下方导出/导入合并；建议配置 Supabase。';
 
   return `
     <section class="hero">
       <h1>Beat Battle 音频评阅</h1>
-      <p class="subtitle">盲听打分 · 赛季制 · 揭晓排名</p>
+      <p class="subtitle">盲听打分 · 赛季制 · 云端同步</p>
     </section>
     <div class="card season-badge">
       <span>第 <strong>${season.id}</strong> 赛季</span>
       <span class="phase-tag phase-${season.phase}">${phaseLabel(season.phase)}</span>
     </div>
+    ${cloudSettingsHtml()}
     ${
       !user
         ? `
       <div class="card">
         <h2>参与评阅</h2>
-        <p>输入你的昵称，同一昵称在本赛季内视为同一人。</p>
+        <p>输入你的昵称，同一昵称在各端视为同一人。</p>
         <form id="join-form" class="form-row">
           <input type="text" id="display-name" placeholder="你的昵称" maxlength="32" required />
           <button type="submit" class="btn primary">加入本赛季</button>
@@ -197,7 +237,7 @@ function renderHome() {
     }
     <div class="card admin-section">
       <h2>活动管理</h2>
-      <p class="hint">主持人可推进赛季阶段；多人活动时请用导出/导入合并数据。</p>
+      <p class="hint">${cloudHint}</p>
       <div class="admin-controls">
         <select id="phase-select">
           <option value="register" ${season.phase === 'register' ? 'selected' : ''}>报名中</option>
@@ -208,10 +248,10 @@ function renderHome() {
         <button type="button" class="btn" id="btn-set-phase">更新阶段</button>
         <button type="button" class="btn warn" id="btn-end-season">结束本赛季并开始下一季</button>
       </div>
-      <div class="import-export">
-        <button type="button" class="btn" id="btn-export">导出赛季数据</button>
+      <div class="import-export ${isCloudEnabled() ? 'muted-section' : ''}">
+        <button type="button" class="btn" id="btn-export">导出备份</button>
         <label class="btn file-label">
-          导入合并数据
+          导入合并
           <input type="file" id="import-file" accept=".json,application/json" hidden />
         </label>
       </div>
@@ -242,35 +282,25 @@ function renderUpload() {
     <section class="page-header">
       <a href="#home" class="back">← 主页</a>
       <h1>上传作品</h1>
-      <p>评阅者<strong>不会</strong>看到文件名，仅通过播放打分。</p>
+      <p>评阅者<strong>不会</strong>看到文件名，仅通过播放打分。${isCloudEnabled() ? '已开启云同步，他人将自动看到新作品。' : ''}</p>
     </section>
     <div class="card">
       <form id="upload-form">
         <label class="file-drop" id="file-drop">
           <input type="file" id="audio-file" accept="audio/*" required hidden />
           <span class="drop-text">点击或拖拽音频文件到此处</span>
-          <span class="drop-hint">支持 wav、mp3、ogg、flac、m4a 等浏览器可播放格式</span>
+          <span class="drop-hint">支持 wav、mp3、ogg、flac、m4a 等；制作页可用 SDK 直传</span>
         </label>
         <button type="submit" class="btn primary full" id="upload-btn" disabled>提交作品</button>
       </form>
     </div>
     ${
       mySubs.length
-        ? `
-    <div class="card">
-      <h2>我的提交</h2>
-      <ul class="sub-list">
-        ${mySubs
-          .map(
-            (s) => `
-          <li>
-            <span>作品 #${s.id.slice(0, 8)}</span>
-            <span class="muted">${new Date(s.uploadedAt).toLocaleString('zh-CN')}</span>
-          </li>`
-          )
-          .join('')}
-      </ul>
-    </div>`
+        ? `<div class="card"><h2>我的提交</h2><ul class="sub-list">${mySubs
+            .map(
+              (s) => `<li><span>作品 #${s.id.slice(0, 8)}</span><span class="muted">${new Date(s.uploadedAt).toLocaleString('zh-CN')}</span></li>`
+            )
+            .join('')}</ul></div>`
         : ''
     }
   `;
@@ -280,22 +310,16 @@ function renderReview() {
   const user = currentUser();
   if (!user) return redirectNotice('请先加入本赛季', '#home');
   const season = getCurrentSeason(state);
-  if (season.phase !== 'review') {
-    return redirectNotice('当前不在评阅阶段', '#home');
-  }
+  if (season.phase !== 'review') return redirectNotice('当前不在评阅阶段', '#home');
 
   const queue = reviewableSubmissions(user.id);
   if (queue.length === 0) {
     return `
-      <section class="page-header">
-        <a href="#home" class="back">← 主页</a>
-        <h1>评阅</h1>
-      </section>
+      <section class="page-header"><a href="#home" class="back">← 主页</a><h1>评阅</h1></section>
       <div class="card empty-state">
         <p>🎉 你已评完所有他人作品（不会评阅自己的作品）。</p>
         <a href="#home" class="btn primary">返回主页</a>
-      </div>
-    `;
+      </div>`;
   }
 
   const sub = queue[0];
@@ -341,13 +365,10 @@ function renderReview() {
 
 function renderRankings() {
   const season = getCurrentSeason(state);
-  if (season.phase !== 'revealed') {
-    return redirectNotice('排名将在揭晓后公布', '#home');
-  }
+  if (season.phase !== 'revealed') return redirectNotice('排名将在揭晓后公布', '#home');
 
   const results = computeRankings(season);
   const byTotal = sortByScore(results, (r) => r.totalAvg);
-
   const totalTable = byTotal
     .map((r, i) => rowHtml(r, i + 1, (x) => x.totalAvg?.toFixed(2) ?? '—'))
     .join('');
@@ -371,7 +392,7 @@ function renderRankings() {
     <section class="page-header">
       <a href="#home" class="back">← 主页</a>
       <h1>第 ${season.id} 赛季排名</h1>
-      <p>姓名已揭晓 · 各维度与总均分</p>
+      <p>姓名已揭晓 · 各维度与总均分（不显示哪位评阅人打的分数）</p>
     </section>
     <div class="card highlight">
       <h2>总均分排名</h2>
@@ -386,22 +407,11 @@ function renderRankings() {
 
 function rowHtml(r, rank, scoreFn) {
   const name = r.user?.name ?? '未知';
-  return `
-    <tr>
-      <td>${rank}</td>
-      <td><strong>${escapeHtml(name)}</strong></td>
-      <td>${scoreFn(r)}</td>
-      <td>${r.reviewCount}</td>
-    </tr>`;
+  return `<tr><td>${rank}</td><td><strong>${escapeHtml(name)}</strong></td><td>${scoreFn(r)}</td><td>${r.reviewCount}</td></tr>`;
 }
 
 function redirectNotice(msg, href) {
-  return `
-    <div class="card empty-state">
-      <p>${escapeHtml(msg)}</p>
-      <a href="${href}" class="btn primary">返回</a>
-    </div>
-  `;
+  return `<div class="card empty-state"><p>${escapeHtml(msg)}</p><a href="${href}" class="btn primary">返回</a></div>`;
 }
 
 function escapeHtml(s) {
@@ -411,12 +421,16 @@ function escapeHtml(s) {
 }
 
 function render() {
-  const app = $('#app');
+  if (!state) {
+    $('#app').innerHTML = '<div class="card empty-state"><p>加载中…</p></div>';
+    return;
+  }
   const page = getPage();
   const navUser = currentUser();
-
   $('#nav-season').textContent = `S${state.currentSeasonId}`;
   $('#nav-user').textContent = navUser ? navUser.name : '未登录';
+  const syncEl = $('#nav-sync');
+  if (syncEl) syncEl.textContent = isCloudEnabled() ? '☁️' : '💾';
 
   let html = '';
   switch (page) {
@@ -432,52 +446,99 @@ function render() {
     default:
       html = renderHome();
   }
-  app.innerHTML = html;
+  $('#app').innerHTML = html;
   bindPageEvents(page);
 }
 
 function bindPageEvents(page) {
   if (page === 'home' || !page) {
-    $('#join-form')?.addEventListener('submit', (e) => {
+    $('#btn-save-cloud')?.addEventListener('click', async () => {
+      const url = $('#sb-url').value.trim();
+      const anonKey = $('#sb-key').value.trim();
+      if (!url || !anonKey) {
+        alert('请填写 Supabase URL 与 anon key');
+        return;
+      }
+      setCloudConfig({ url, anonKey });
+      initCloud();
+      try {
+        await reloadFromCloud();
+        subscribeSeasonChanges(scheduleCloudReload);
+        alert('云同步已连接');
+      } catch (err) {
+        alert('连接失败：' + err.message);
+      }
+    });
+
+    $('#join-form')?.addEventListener('submit', async (e) => {
       e.preventDefault();
       const name = $('#display-name').value.trim();
       if (!name) return;
-      let user = Object.values(state.users).find((u) => u.name === name);
-      if (!user) {
-        user = { id: generateId(), name, joinedAt: Date.now() };
-        state.users[user.id] = user;
+      try {
+        if (cloudActive()) {
+          const u = await findOrCreateUser(name);
+          state.currentUserId = u.id;
+          state.users[u.id] = { id: u.id, name: u.name, joinedAt: Date.now() };
+          setCurrentUserId(u.id);
+          await reloadFromCloud();
+        } else {
+          let user = Object.values(state.users).find((u) => u.name === name);
+          if (!user) {
+            user = { id: generateId(), name, joinedAt: Date.now() };
+            state.users[user.id] = user;
+          }
+          state.currentUserId = user.id;
+          persist();
+        }
+      } catch (err) {
+        alert('加入失败：' + err.message);
       }
-      state.currentUserId = user.id;
-      persist();
     });
 
     $('#btn-switch-user')?.addEventListener('click', () => {
       state.currentUserId = null;
+      setCurrentUserId(null);
       persist();
     });
 
-    $('#btn-set-phase')?.addEventListener('click', () => {
+    $('#btn-set-phase')?.addEventListener('click', async () => {
       const phase = $('#phase-select').value;
-      const season = getCurrentSeason(state);
-      season.phase = phase;
-      state.phase = phase;
-      if (phase === 'revealed' && !season.endedAt) {
-        season.endedAt = Date.now();
+      try {
+        if (cloudActive()) {
+          await updateSeasonPhase(state.currentSeasonId, phase);
+          await reloadFromCloud();
+        } else {
+          const season = getCurrentSeason(state);
+          season.phase = phase;
+          state.phase = phase;
+          if (phase === 'revealed' && !season.endedAt) season.endedAt = Date.now();
+          persist();
+        }
+      } catch (err) {
+        alert('更新失败：' + err.message);
       }
-      persist();
     });
 
     $('#btn-end-season')?.addEventListener('click', async () => {
-      if (!confirm('确定结束当前赛季？将归档并开启下一赛季，当前评阅数据保留在历史中。')) return;
-      const season = getCurrentSeason(state);
-      season.phase = 'revealed';
-      season.endedAt = Date.now();
-      state.currentSeasonId += 1;
-      ensureSeason(state, state.currentSeasonId);
-      const next = getCurrentSeason(state);
-      next.phase = 'register';
-      state.phase = 'register';
-      persist();
+      if (!confirm('确定结束当前赛季？将归档并开启下一赛季。')) return;
+      try {
+        if (cloudActive()) {
+          const nextId = await startNewSeason(state.currentSeasonId);
+          state.currentSeasonId = nextId;
+          await reloadFromCloud();
+        } else {
+          const season = getCurrentSeason(state);
+          season.phase = 'revealed';
+          season.endedAt = Date.now();
+          state.currentSeasonId += 1;
+          ensureSeason(state, state.currentSeasonId);
+          getCurrentSeason(state).phase = 'register';
+          state.phase = 'register';
+          persist();
+        }
+      } catch (err) {
+        alert('操作失败：' + err.message);
+      }
     });
 
     $('#btn-export')?.addEventListener('click', async () => {
@@ -498,8 +559,7 @@ function bindPageEvents(page) {
       const file = e.target.files?.[0];
       if (!file) return;
       try {
-        const text = await file.text();
-        const payload = JSON.parse(text);
+        const payload = JSON.parse(await file.text());
         state = await importSeasonData(state, payload);
         if (payload.season?.id) state.currentSeasonId = payload.season.id;
         persist();
@@ -522,7 +582,7 @@ function bindPageEvents(page) {
         return;
       }
       input.files = createFileList(file);
-      drop.querySelector('.drop-text').textContent = file.name;
+      drop.querySelector('.drop-text').textContent = '已选择文件（评阅者不会看到此名称）';
       btn.disabled = false;
     };
 
@@ -547,18 +607,24 @@ function bindPageEvents(page) {
       btn.disabled = true;
       btn.textContent = '上传中…';
       try {
-        const audioId = generateId();
-        await saveAudioBlob(audioId, file);
-        const season = getCurrentSeason(state);
-        const subId = generateId();
-        season.submissions[subId] = {
-          id: subId,
-          userId: user.id,
-          audioId,
-          uploadedAt: Date.now(),
-        };
-        persist();
-        setHash('upload');
+        if (cloudActive()) {
+          await createSubmission(state.currentSeasonId, user.id, file);
+          await reloadFromCloud();
+          setHash('upload');
+        } else {
+          const audioId = generateId();
+          await saveAudioBlob(audioId, file);
+          const season = getCurrentSeason(state);
+          const subId = generateId();
+          season.submissions[subId] = {
+            id: subId,
+            userId: user.id,
+            audioId,
+            uploadedAt: Date.now(),
+          };
+          persist();
+          setHash('upload');
+        }
       } catch (err) {
         alert('上传失败：' + err.message);
         btn.disabled = false;
@@ -572,7 +638,7 @@ function bindPageEvents(page) {
     const subId = form?.dataset.submissionId;
     if (subId) playSubmission(subId);
 
-    form?.addEventListener('submit', (e) => {
+    form?.addEventListener('submit', async (e) => {
       e.preventDefault();
       const user = currentUser();
       if (!user || !subId) return;
@@ -591,17 +657,28 @@ function bindPageEvents(page) {
         alert('不能评阅自己的作品');
         return;
       }
-      season.reviews.push({
-        id: generateId(),
-        reviewerId: user.id,
-        submissionId: subId,
-        scores,
-        totalAvg: averageScores(scores),
-        reviewedAt: Date.now(),
-      });
-      revokeAudioUrl();
-      persist();
-      setHash('review');
+      try {
+        if (cloudActive()) {
+          await createReview(state.currentSeasonId, user.id, subId, scores);
+          revokeAudioUrl();
+          await reloadFromCloud();
+          setHash('review');
+        } else {
+          season.reviews.push({
+            id: generateId(),
+            reviewerId: user.id,
+            submissionId: subId,
+            scores,
+            totalAvg: averageScores(scores),
+            reviewedAt: Date.now(),
+          });
+          revokeAudioUrl();
+          persist();
+          setHash('review');
+        }
+      } catch (err) {
+        alert('提交失败：' + err.message);
+      }
     });
   }
 }
@@ -617,8 +694,15 @@ window.addEventListener('hashchange', () => {
   render();
 });
 
-window.addEventListener('load', () => {
+async function bootstrap() {
+  if (isCloudEnabled()) initCloud();
+  state = await loadState();
   ensureSeason(state, state.currentSeasonId);
+  if (isCloudEnabled()) {
+    subscribeSeasonChanges(scheduleCloudReload);
+  }
   if (!location.hash) setHash('home');
   render();
-});
+}
+
+window.addEventListener('load', bootstrap);

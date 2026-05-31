@@ -424,3 +424,13 @@ code {
     grid-template-columns: 1.5rem 1fr;
   }
 }
+
+.cloud-card summary { cursor: pointer; color: var(--muted); margin-bottom: 0.5rem; }
+.form-col { display: flex; flex-direction: column; gap: 0.65rem; margin-top: 0.75rem; }
+.form-col label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.85rem; color: var(--muted); }
+.form-col input { padding: 0.5rem 0.75rem; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); }
+.sync-badge { font-size: 0.75rem; padding: 0.2rem 0.5rem; border-radius: 999px; margin-left: 0.35rem; }
+.sync-badge.on { background: rgba(61, 214, 140, 0.2); color: var(--success); }
+.sync-badge.off { background: var(--surface2); color: var(--muted); }
+.link-doc { font-size: 0.85rem; color: var(--accent); }
+.muted-section { opacity: 0.65; }

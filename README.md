@@ -1,37 +1,56 @@
 # Beat Battle · 音频评阅
 
-盲听音频评阅 Web 应用：参与者上传作品、互相评阅（不会评阅自己的作品），赛季结束后揭晓姓名与排名。
+盲听音频评阅 Web 应用：上传作品、互相评阅、赛季排名。**支持 Supabase 云同步**，编曲制作页可通过 SDK 直传，无需导出 JSON。
 
-**在线访问**（部署后）：`https://jk9988610.github.io/Beat-Battle/`
+**在线访问**：https://jk9988610.github.io/Beat-Battle/
+
+## 云同步（一次性配置）
+
+多人（甲、乙、丙）自动看到彼此上传与评分，需免费 [Supabase](https://supabase.com) 项目：
+
+1. 新建项目 → **SQL Editor** 运行 [`supabase/schema.sql`](supabase/schema.sql)
+2. **Storage** → 新建 bucket：`audio`，勾选 **Public**
+3. **Project Settings → API** 复制 URL 与 `anon` `public` key
+4. 评阅站主页 → **云同步** → 粘贴并「保存并连接」
+5. 制作页使用相同 URL/key，见 [`docs/integrate-production.md`](docs/integrate-production.md)
+
+配置完成后：
+
+- 甲上传 → 乙、丙打开评阅站**自动**出现待评作品（Realtime）
+- 制作页 `BeatBattle.uploadAudio(blob)` → 同上，无需导入文件
 
 ## 功能
 
-- **上传**：支持浏览器可播放的任意音频格式（wav、mp3、ogg、flac、m4a 等）
-- **盲评**：评阅时仅播放音频，不显示文件名与作者
-- **五维打分**（1–5 分）：完整度、流畅度、舒适度、表现力、制作质量，每档配有针对性趣味描述
-- **赛季制**：结束本赛季后自动开启下一赛季，历史数据保留
-- **排名揭晓**：总均分与各维度均分排行榜
-- **数据合并**：导出/导入 JSON，便于多人分别评阅后由主持人合并
+- 盲评（不显示文件名与作者）
+- 五维 1–5 分趣味描述
+- 不评阅自己作品
+- 赛季制与排名揭晓
+- 未配置云同步时仍可用本机存储 + 导出/导入备份
 
-## 使用流程
+## 制作页 SDK 示例
 
-1. 打开网站，输入昵称加入当前赛季
-2. 主持人将阶段设为「上传作品」，参与者上传音频
-3. 主持人将阶段设为「评阅中」，参与者进入「开始评阅」为他人作品打分
-4. 主持人将阶段设为「已揭晓」，查看「赛季排名」
-5. 点击「结束本赛季并开始下一季」进入新赛季
+```html
+<script type="module">
+  import { BeatBattle } from 'https://jk9988610.github.io/Beat-Battle/js/beat-battle-sdk.js';
+
+  await BeatBattle.init({
+    supabaseUrl: 'https://你的项目.supabase.co',
+    supabaseAnonKey: '你的 anon key',
+    userName: '甲',
+  });
+
+  const blob = await myExporter(); // 你页面已有的导出
+  await BeatBattle.uploadAudio(blob);
+</script>
+```
 
 ## 本地预览
 
 ```bash
-cd /path/to/Beat-Battle
 python3 -m http.server 8080
 ```
 
-浏览器访问 `http://localhost:8080`（需通过 HTTP 提供，直接打开 `file://` 可能限制部分 API）。
+## 技术栈
 
-## 技术说明
-
-- 纯静态 SPA（HTML + CSS + ES Modules）
-- 音频存储于 IndexedDB，元数据与评分存于 localStorage
-- 通过 GitHub Actions 部署至 GitHub Pages
+- 静态 SPA + Supabase（Postgres + Storage + Realtime）
+- GitHub Pages 部署

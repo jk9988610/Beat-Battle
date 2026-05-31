@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>制作页提交示例</title>
+</head>
+<body>
+  <h1>编曲制作页 → Beat Battle 直传示例</h1>
+  <p>将下方常量换成你的 Supabase 配置，并与评阅站昵称一致。</p>
+  <button id="submit">导出并提交到 Beat Battle</button>
+  <pre id="log"></pre>
+
+  <script type="module">
+    import { BeatBattle } from '../js/beat-battle-sdk.js';
+
+    const SUPABASE_URL = 'https://YOUR_PROJECT.supabase.co';
+    const SUPABASE_ANON_KEY = 'YOUR_ANON_KEY';
+    const USER_NAME = '甲';
+
+    const log = (msg) => { document.getElementById('log').textContent += msg + '\n'; };
+
+    document.getElementById('submit').addEventListener('click', async () => {
+      try {
+        await BeatBattle.init({
+          supabaseUrl: SUPABASE_URL,
+          supabaseAnonKey: SUPABASE_ANON_KEY,
+          userName: USER_NAME,
+        });
+        // 演示：用静音 wav 代替真实导出
+        const blob = new Blob([new Uint8Array(44)], { type: 'audio/wav' });
+        const { submissionId } = await BeatBattle.uploadAudio(blob);
+        log('成功 submissionId: ' + submissionId);
+      } catch (e) {
+        log('失败: ' + e.message);
+      }
+    });
+  </script>
+</body>
+</html>
