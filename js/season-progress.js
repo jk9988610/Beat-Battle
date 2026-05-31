@@ -80,7 +80,7 @@ export async function maybeAutoProgressSeason(state, { saveState }) {
     return { changed: true, phase: 'revealed' };
   }
 
-  if (season.phase === 'revealed') {
+  if (season.phase === 'revealed' && rules.autoNewSeason) {
     if (!season.revealedAt) season.revealedAt = Date.now();
     const stats2 = getSeasonStats(season);
     if (stats2.shouldEndSeason) {

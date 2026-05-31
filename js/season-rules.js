@@ -5,9 +5,11 @@ export const DEFAULT_SEASON_RULES = {
   minParticipants: 3,
   /** 至少多少首作品才可进入评阅 */
   minSubmissions: 3,
-  /** 是否根据人数/评阅完成情况自动推进阶段 */
+  /** 是否根据人数/评阅完成情况自动推进阶段（报名→评阅→揭晓） */
   autoProgress: true,
-  /** 公布成绩后多少秒自动结束赛季并开启下一季 */
+  /** 揭晓后是否自动结束本赛季并开启下一季（默认关闭，需管理员手动结束） */
+  autoNewSeason: false,
+  /** 公布成绩后多少秒自动开新赛季（仅当 autoNewSeason 为 true 时生效） */
   newSeasonDelaySec: 15,
 };
 
@@ -34,6 +36,7 @@ export function normalizeRules(rules = {}) {
     minParticipants: Math.max(1, Number(rules.minParticipants) || DEFAULT_SEASON_RULES.minParticipants),
     minSubmissions: Math.max(1, Number(rules.minSubmissions) || DEFAULT_SEASON_RULES.minSubmissions),
     autoProgress: rules.autoProgress !== false,
+    autoNewSeason: rules.autoNewSeason === true,
     newSeasonDelaySec: Math.max(
       0,
       Number(rules.newSeasonDelaySec ?? DEFAULT_SEASON_RULES.newSeasonDelaySec)
@@ -115,6 +118,7 @@ export function getSeasonStats(season) {
   const revealedAt = season.revealedAt || null;
   const delayMs = rules.newSeasonDelaySec * 1000;
   const shouldEndSeason =
+    rules.autoNewSeason &&
     season.phase === 'revealed' &&
     revealedAt != null &&
     (rules.newSeasonDelaySec === 0 || Date.now() - revealedAt >= delayMs);
@@ -156,10 +160,12 @@ export function formatSeasonProgressHtml(season) {
       `<li>${s.allReviewed ? '✅ 全部评完，将自动公布成绩' : '⏳ 尚有未完成的评阅'}</li>`,
     ];
   } else if (season.phase === 'revealed') {
-    if (rules.autoProgress && rules.newSeasonDelaySec > 0 && s.newSeasonInSec > 0) {
+    if (rules.autoNewSeason && rules.newSeasonDelaySec > 0 && s.newSeasonInSec > 0) {
       lines = [`<li>约 <strong>${s.newSeasonInSec}</strong> 秒后自动开启下一赛季</li>`];
-    } else if (rules.autoProgress) {
+    } else if (rules.autoNewSeason && rules.newSeasonDelaySec === 0) {
       lines = [`<li>即将自动开启下一赛季…</li>`];
+    } else {
+      lines = [`<li>本赛季已揭晓，请管理员在设置中手动结束赛季并开启下一季</li>`];
     }
   }
 

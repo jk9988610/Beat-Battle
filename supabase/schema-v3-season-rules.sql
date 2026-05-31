@@ -5,6 +5,7 @@ alter table seasons
     "minParticipants": 3,
     "minSubmissions": 3,
     "autoProgress": true,
+    "autoNewSeason": false,
     "newSeasonDelaySec": 15
   }'::jsonb;
 
@@ -14,5 +15,5 @@ alter table seasons
 alter table seasons
   add column if not exists revealed_at timestamptz;
 
-comment on column seasons.rules is '赛季规则：minParticipants, minSubmissions, autoProgress, newSeasonDelaySec';
+comment on column seasons.rules is '赛季规则：minParticipants, minSubmissions, autoProgress, autoNewSeason, newSeasonDelaySec';
 comment on column seasons.participant_ids is '本赛季已报名用户 id 列表';

@@ -66,15 +66,19 @@ function renderActivityPanel(user, season, cloudHint) {
       <label>最少作品数
         <input type="number" id="rule-min-submissions" min="1" max="99" value="${rules.minSubmissions}" />
       </label>
-      <label>公布成绩后自动开新赛季（秒，0=立即）
-        <input type="number" id="rule-new-season-delay" min="0" max="3600" value="${rules.newSeasonDelaySec}" />
-      </label>
       <label class="checkbox-row">
         <input type="checkbox" id="rule-auto-progress" ${rules.autoProgress ? 'checked' : ''} />
-        满足条件时自动推进阶段
+        满足条件时自动推进阶段（报名→评阅→揭晓）
+      </label>
+      <label class="checkbox-row">
+        <input type="checkbox" id="rule-auto-new-season" ${rules.autoNewSeason ? 'checked' : ''} />
+        揭晓后自动开启下一赛季
+      </label>
+      <label>自动开新赛季延迟（秒，0=立即，仅勾选上一项时生效）
+        <input type="number" id="rule-new-season-delay" min="0" max="3600" value="${rules.newSeasonDelaySec}" />
       </label>
       <button type="submit" class="btn primary">保存本赛季规则</button>
-      <p class="hint">报名阶段可直接上传作品，无需等人齐；作品数与参赛人数达标后自动进入评阅；全部评完后自动公布成绩并开启新赛季。</p>
+      <p class="hint">报名阶段可直接上传作品；人数与作品达标后可自动进入评阅、自动揭晓。默认不会自动开新赛季，请在下方「结束本赛季」手动开启，或勾选「揭晓后自动开启下一赛季」。</p>
     </form>
     <h3>手动阶段</h3>
     <div class="admin-controls">
@@ -271,6 +275,7 @@ export function bindSettingsPageEvents(ctx) {
         minSubmissions: Number($('#rule-min-submissions')?.value),
         newSeasonDelaySec: Number($('#rule-new-season-delay')?.value),
         autoProgress: $('#rule-auto-progress')?.checked,
+        autoNewSeason: $('#rule-auto-new-season')?.checked,
       });
     }
   });
