@@ -39,6 +39,13 @@ export function revokeAdminSession() {
   sessionStorage.removeItem(ADMIN_SESSION_KEY);
 }
 
+/** 昵称在白名单时，加入后自动获得本标签页管理权限 */
+export function grantAdminSessionIfEligible(name) {
+  if (isAdminByName(name)) {
+    sessionStorage.setItem(ADMIN_SESSION_KEY, '1');
+  }
+}
+
 export function assertAdmin(user) {
   if (!isAdmin(user)) {
     throw new Error('需要管理员权限：请前往「设置」验证，或使用管理员昵称加入');

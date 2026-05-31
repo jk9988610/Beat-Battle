@@ -8,6 +8,7 @@ import {
   assertAdmin,
   getAdminHint,
   isAdminByName,
+  grantAdminSessionIfEligible,
 } from './admin.js';
 import { renderSettingsPage, bindSettingsPageEvents } from './settings-page.js';
 import {
@@ -39,7 +40,7 @@ import {
 let state = null;
 let audioObjectUrl = null;
 let reloadTimer = null;
-let uploadMode = 'local';
+let uploadMode = 'library';
 let publishedWorksCache = [];
 
 const $ = (sel) => document.querySelector(sel);
@@ -735,6 +736,7 @@ function bindPageEvents(page) {
           state.users[u.id] = { id: u.id, name: u.name, joinedAt: Date.now() };
           setCurrentUserId(u.id);
           saveSession({ userId: u.id, userName: u.name });
+          grantAdminSessionIfEligible(u.name);
           await reloadFromCloud();
         } else {
           let user = Object.values(state.users).find((u) => u.name === name);
@@ -744,6 +746,7 @@ function bindPageEvents(page) {
           }
           state.currentUserId = user.id;
           saveSession({ userId: user.id, userName: user.name });
+          grantAdminSessionIfEligible(user.name);
           persist();
         }
       } catch (err) {
@@ -774,6 +777,11 @@ function bindPageEvents(page) {
   }
 
   if (page === 'upload') {
+    if (isCloudEnabled() && uploadMode === 'library') {
+      refreshPublishedWorks().then(() => {
+        if (getPage() === 'upload') render();
+      });
+    }
     bindUploadPageEvents();
   }
 
@@ -879,6 +887,8 @@ async function bootstrap() {
     state = await loadState();
   }
   ensureSeason(state, state.currentSeasonId);
+  const bootUser = currentUser();
+  if (bootUser) grantAdminSessionIfEligible(bootUser.name);
   if (!location.hash) setHash('home');
   render();
 }

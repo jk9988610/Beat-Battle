@@ -9,6 +9,8 @@ import {
 import { isAdmin, tryElevateWithPin, revokeAdminSession, getAdminHint } from './admin.js';
 import { initCloud } from './remote.js';
 
+const $ = (sel) => document.querySelector(sel);
+
 function escapeHtml(s) {
   const d = document.createElement('div');
   d.textContent = s;

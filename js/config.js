@@ -10,7 +10,7 @@ export const DEFAULT_CLOUD_CONFIG = {
 
 /** 默认管理员配置（可在「设置」页修改，保存到本机） */
 export const DEFAULT_ADMIN_SETTINGS = {
-  userNames: ['管理员', '主持人'],
+  userNames: ['管理员'],
   pin: 'bb2026',
 };
 
@@ -31,7 +31,11 @@ export function getAdminSettings() {
   } catch {
     /* ignore */
   }
-  return { ...DEFAULT_ADMIN_SETTINGS, userNames: [...DEFAULT_ADMIN_SETTINGS.userNames] };
+  const base = { ...DEFAULT_ADMIN_SETTINGS, userNames: [...DEFAULT_ADMIN_SETTINGS.userNames] };
+  if (!base.userNames.some((n) => n.trim() === '管理员')) {
+    base.userNames.unshift('管理员');
+  }
+  return base;
 }
 
 export function setAdminSettings({ userNames, pin }) {
