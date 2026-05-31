@@ -29,6 +29,7 @@ body {
 }
 
 .top-nav {
+  flex-wrap: wrap;
   display: grid;
   grid-template-columns: 1fr auto auto;
   align-items: center;
@@ -64,6 +65,23 @@ body {
 .nav-settings-btn:hover {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+
+.nav-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex: 1;
+  justify-content: center;
+}
+.nav-actions .btn-sm {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+}
+.top-nav .copy-toast {
+  font-size: 0.7rem;
+  margin-right: 0.25rem;
 }
 
 .top-nav .nav-meta {
@@ -470,6 +488,8 @@ code {
 }
 
 .app-footer {
+  display: none !important;
+
   position: sticky;
   bottom: 0;
   display: flex;
@@ -672,7 +692,7 @@ code {
 
 .library-preview-dock {
   position: sticky;
-  bottom: 3.25rem;
+  bottom: 0;
   z-index: 20;
   margin: 0 auto;
   max-width: 42rem;

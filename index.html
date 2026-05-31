@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="bb-app-version" content="1.8.3" />
+    <meta name="bb-app-version" content="1.8.4" />
     <meta name="bb-app-build" content="dev" />
     <meta name="description" content="Beat Battle 音频盲评 — 上传、评阅、云端同步、赛季排名" />
     <title>Beat Battle · 音频评阅</title>
@@ -12,9 +12,14 @@
   <body>
     <nav class="top-nav">
       <a href="#home" class="nav-brand">Beat Battle</a>
-      <button type="button" id="nav-settings-btn" class="nav-settings-btn">设置</button>
+      <div class="nav-actions">
+        <button type="button" class="btn ghost btn-sm" id="btn-update" title="检查并更新到最新版本">更新</button>
+        <button type="button" class="btn ghost btn-sm" id="btn-copy-debug" title="复制版本与运行状态">调试</button>
+        <button type="button" id="nav-settings-btn" class="nav-settings-btn">设置</button>
+      </div>
       <div class="nav-meta">
         <span id="nav-version" class="nav-version bb-version-badge" title="构建版本"><span class="bb-version-label">…</span></span>
+        <span id="copy-debug-toast" class="copy-toast" hidden>已复制</span>
         <span id="nav-sync" title="云同步状态">💾</span>
         <span id="nav-season">S1</span>
         <span id="nav-user">未登录</span>
@@ -31,14 +36,6 @@
         class="audio-player library-preview"
       ></audio>
     </div>
-    <footer class="app-footer">
-      <span id="footer-version" class="bb-version-badge" title="当前版本"><span class="bb-version-label">加载版本…</span></span>
-      <button type="button" class="btn ghost btn-sm" id="btn-update" title="检查并更新到最新版本">更新</button>
-      <button type="button" class="btn ghost btn-sm" id="btn-copy-debug" title="复制版本与运行状态，便于反馈问题">
-        复制调试信息
-      </button>
-      <span id="copy-debug-toast" class="copy-toast" hidden>已复制</span>
-    </footer>
     <script type="module" src="js/app.js"></script>
   </body>
 </html>

@@ -76,6 +76,23 @@ let autoProgressTimer = null;
 
 const $ = (sel) => document.querySelector(sel);
 
+function renderUnlessPreviewing() {
+  if (shouldDeferUiRefresh()) {
+    markPendingUiRefresh();
+    return false;
+  }
+  render();
+  return true;
+}
+
+function flushPendingUiWork() {
+  if (consumePendingCloudReload() && isCloudEnabled()) {
+    reloadFromCloud();
+    return;
+  }
+  if (consumePendingUiRefresh()) render();
+}
+
 function normalizeAllSeasons() {
   if (!state?.seasons) return;
   for (const s of Object.values(state.seasons)) normalizeSeason(s);
@@ -159,7 +176,7 @@ function currentUser() {
 function setHash(route) {
   const path = route.startsWith('#') ? route.slice(1) : route;
   if (location.hash.replace(/^#/, '') === path) {
-    renderUnlessPreviewing();
+    if (state) renderUnlessPreviewing();
   } else {
     location.hash = path;
   }
@@ -671,7 +688,7 @@ function updateVersionUI() {
   syncVersionLabels();
   const ver = $('#nav-version');
   if (ver) {
-    ver.title = `Beat Battle ${label}\n有新版本时版本号会高亮，或点击「更新」`;
+    ver.title = `Beat Battle ${label}\n顶栏「更新」可拉取最新版本`;
   }
 }
 
@@ -1071,8 +1088,12 @@ async function bootstrap() {
     grantAdminSessionIfEligible(bootUser.name);
     await saveSeasonParticipant(state, bootUser.id, { cloudActive, joinSeasonParticipantRemote, saveState });
   }
-  await runAutoProgress();
-  if (!location.hash) setHash('home');
+  try {
+    await runAutoProgress();
+  } catch (err) {
+    console.error('auto progress on boot', err);
+  }
+  if (!location.hash) location.hash = 'home';
   render();
   scheduleAutoProgress();
 }
