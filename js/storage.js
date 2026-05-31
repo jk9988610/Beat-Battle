@@ -1,12 +1,9 @@
-import {
-  cloudActive,
-  initCloud,
-  fetchRemoteState,
-  downloadAudioFromCloud,
-  uploadAudioToCloud,
-} from './remote.js';
 import { isCloudEnabled } from './config.js';
 import { withTimeout } from './async-utils.js';
+
+async function remoteModule() {
+  return import('./remote.js');
+}
 
 const DB_NAME = 'beat-battle-audio';
 const DB_VERSION = 1;
@@ -73,11 +70,11 @@ export async function loadState() {
   const local = loadLocalState();
   if (!isCloudEnabled()) return local;
   try {
-    initCloud();
-    const remote = await withTimeout(fetchRemoteState(), 12000, '云同步');
-    if (remote) {
-      saveLocalState(remote);
-      return remote;
+    const { fetchRemoteStateRest } = await import('./remote-rest.js');
+    const data = await withTimeout(fetchRemoteStateRest(), 12000, '云同步');
+    if (data) {
+      saveLocalState(data);
+      return data;
     }
   } catch (err) {
     console.warn('云同步失败，使用本地缓存', err);
@@ -117,18 +114,32 @@ export function generateId() {
 
 export async function saveAudioBlob(id, blob) {
   await idbPut(id, blob);
-  if (cloudActive() && id.includes('/')) {
-    await uploadAudioToCloud(id, blob);
+  if (isCloudEnabled() && id.includes('/')) {
+    try {
+      const { uploadAudioToCloud, cloudActive, initCloudAsync } = await remoteModule();
+      await initCloudAsync();
+      if (cloudActive()) await uploadAudioToCloud(id, blob);
+    } catch (e) {
+      console.warn('云上传失败', e);
+    }
   }
 }
 
 export async function getAudioBlob(id) {
   let blob = await idbGet(id);
   if (blob) return blob;
-  if (cloudActive() && id.includes('/')) {
-    blob = await downloadAudioFromCloud(id);
-    if (blob) await idbPut(id, blob);
-    return blob;
+  if (isCloudEnabled() && id.includes('/')) {
+    try {
+      const { downloadAudioFromCloud, cloudActive, initCloudAsync } = await remoteModule();
+      await initCloudAsync();
+      if (cloudActive()) {
+        blob = await downloadAudioFromCloud(id);
+        if (blob) await idbPut(id, blob);
+        return blob;
+      }
+    } catch (e) {
+      console.warn('云下载失败', e);
+    }
   }
   return null;
 }

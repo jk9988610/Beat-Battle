@@ -1,4 +1,3 @@
-import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.1/+esm';
 import { getCloudConfig, isCloudEnabled } from './config.js';
 import { averageScores } from './scoring.js';
 import { DEFAULT_SEASON_RULES, normalizeRules } from './season-rules.js';
@@ -6,24 +5,65 @@ import { formatSupabaseError } from './supabase-error.js';
 
 let client = null;
 let unsubscribe = null;
+let clientInitPromise = null;
+let supabaseLibPromise = null;
+
+const SUPABASE_CDN_URLS = [
+  'https://esm.sh/@supabase/supabase-js@2.49.1?bundle',
+  'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.1/+esm',
+];
+
+async function importSupabaseLib() {
+  if (!supabaseLibPromise) {
+    supabaseLibPromise = (async () => {
+      let lastErr;
+      for (const url of SUPABASE_CDN_URLS) {
+        try {
+          return await import(url);
+        } catch (e) {
+          lastErr = e;
+        }
+      }
+      throw lastErr || new Error('Supabase SDK 无法加载');
+    })();
+  }
+  return supabaseLibPromise;
+}
 
 export function cloudActive() {
   return isCloudEnabled() && client != null;
 }
 
-export function initCloud() {
+export async function initCloudAsync() {
   if (!isCloudEnabled()) {
     client = null;
     return null;
   }
-  const { url, anonKey } = getCloudConfig();
-  client = createClient(url, anonKey);
+  if (client) return client;
+  if (!clientInitPromise) {
+    clientInitPromise = (async () => {
+      const { createClient } = await importSupabaseLib();
+      const { url, anonKey } = getCloudConfig();
+      client = createClient(url, anonKey);
+      return client;
+    })();
+  }
+  return clientInitPromise;
+}
+
+export function initCloud() {
+  initCloudAsync().catch((e) => console.warn('initCloud', e));
   return client;
 }
 
 export function getClient() {
-  if (!client && isCloudEnabled()) initCloud();
   return client;
+}
+
+async function requireClient() {
+  const sb = await initCloudAsync();
+  if (!sb) throw new Error('云同步未就绪');
+  return sb;
 }
 
 function defaultState() {
@@ -37,85 +77,17 @@ function defaultState() {
 }
 
 export async function fetchRemoteState() {
-  const sb = getClient();
-  if (!sb) return null;
-
-  const { data: seasonRows, error: sErr } = await sb
-    .from('seasons')
-    .select('*')
-    .order('id', { ascending: false });
-  if (sErr) throw sErr;
-
-  const { data: userRows, error: uErr } = await sb.from('users').select('*');
-  if (uErr) throw uErr;
-
-  const state = defaultState();
-  const users = {};
-  for (const u of userRows || []) {
-    users[u.id] = { id: u.id, name: u.name, joinedAt: new Date(u.created_at).getTime() };
-  }
-  state.users = users;
-
-  if (!seasonRows?.length) {
-    await sb.from('seasons').upsert({ id: 1, phase: 'register' });
-    seasonRows.push({ id: 1, phase: 'register', started_at: new Date().toISOString() });
-  }
-
-  const currentId = seasonRows[0].id;
-  state.currentSeasonId = currentId;
-  state.phase = seasonRows.find((s) => s.id === currentId)?.phase || 'register';
-
-  for (const row of seasonRows) {
-    const sid = String(row.id);
-    const { data: subs } = await sb
-      .from('submissions')
-      .select('*')
-      .eq('season_id', row.id);
-    const { data: revs } = await sb.from('reviews').select('*').eq('season_id', row.id);
-
-    const submissions = {};
-    for (const s of subs || []) {
-      submissions[s.id] = {
-        id: s.id,
-        userId: s.user_id,
-        audioId: s.audio_path,
-        uploadedAt: new Date(s.uploaded_at).getTime(),
-      };
-    }
-
-    state.seasons[sid] = {
-      id: row.id,
-      phase: row.phase,
-      startedAt: new Date(row.started_at).getTime(),
-      endedAt: row.ended_at ? new Date(row.ended_at).getTime() : null,
-      revealedAt: row.revealed_at ? new Date(row.revealed_at).getTime() : null,
-      participantIds: Array.isArray(row.participant_ids) ? [...row.participant_ids] : [],
-      rules: normalizeRules(row.rules || DEFAULT_SEASON_RULES),
-      submissions,
-      reviews: (revs || []).map((r) => ({
-        id: r.id,
-        reviewerId: r.reviewer_id,
-        submissionId: r.submission_id,
-        scores: r.scores,
-        totalAvg: r.total_avg,
-        reviewedAt: new Date(r.reviewed_at).getTime(),
-      })),
-    };
-  }
-
-  const savedUserId = localStorage.getItem('beat-battle-current-user-id');
-  if (savedUserId && users[savedUserId]) state.currentUserId = savedUserId;
-
-  return state;
+  const { fetchRemoteStateRest } = await import('./remote-rest.js');
+  return fetchRemoteStateRest();
 }
 
 export async function ensureRemoteSeason(seasonId) {
-  const sb = getClient();
+  const sb = await requireClient();
   await sb.from('seasons').upsert({ id: seasonId, phase: 'register' });
 }
 
 export async function findOrCreateUser(name) {
-  const sb = getClient();
+  const sb = await requireClient();
   const trimmed = name.trim();
   const { data: existing } = await sb.from('users').select('*').eq('name', trimmed).maybeSingle();
   if (existing) return existing;
@@ -126,7 +98,7 @@ export async function findOrCreateUser(name) {
 }
 
 export async function uploadAudioToCloud(path, blob) {
-  const sb = getClient();
+  const sb = await requireClient();
   const { error } = await sb.storage.from('audio').upload(path, blob, {
     upsert: true,
     contentType: blob.type || 'audio/mpeg',
@@ -136,21 +108,21 @@ export async function uploadAudioToCloud(path, blob) {
 }
 
 export async function copyAudioInCloud(fromPath, toPath) {
-  const sb = getClient();
+  const sb = await requireClient();
   const { error } = await sb.storage.from('audio').copy(fromPath, toPath);
   if (error) throw error;
   return toPath;
 }
 
 export async function downloadAudioFromCloud(path) {
-  const sb = getClient();
+  const sb = await requireClient();
   const { data, error } = await sb.storage.from('audio').download(path);
   if (error) throw new Error(formatSupabaseError(error));
   return data;
 }
 
 export async function createSubmission(seasonId, userId, blob) {
-  const sb = getClient();
+  const sb = await requireClient();
   const subId = crypto.randomUUID();
   const ext = (blob.type || 'audio/mpeg').split('/')[1]?.split(';')[0] || 'mp3';
   const audioPath = `${seasonId}/${subId}.${ext}`;
@@ -175,7 +147,7 @@ export async function createSubmission(seasonId, userId, blob) {
 }
 
 export async function createReview(seasonId, reviewerId, submissionId, scores) {
-  const sb = getClient();
+  const sb = await requireClient();
   const { data, error } = await sb
     .from('reviews')
     .insert({
@@ -192,7 +164,7 @@ export async function createReview(seasonId, reviewerId, submissionId, scores) {
 }
 
 export async function updateSeasonPhase(seasonId, phase) {
-  const sb = getClient();
+  const sb = await requireClient();
   const patch = { phase };
   const now = new Date().toISOString();
   if (phase === 'revealed') {
@@ -204,7 +176,7 @@ export async function updateSeasonPhase(seasonId, phase) {
 }
 
 export async function updateSeasonRulesRemote(seasonId, rules) {
-  const sb = getClient();
+  const sb = await requireClient();
   const { error } = await sb
     .from('seasons')
     .update({ rules: normalizeRules(rules) })
@@ -213,7 +185,7 @@ export async function updateSeasonRulesRemote(seasonId, rules) {
 }
 
 export async function joinSeasonParticipantRemote(seasonId, userId) {
-  const sb = getClient();
+  const sb = await requireClient();
   try {
     const { data: row, error: fetchErr } = await sb
       .from('seasons')
@@ -237,7 +209,7 @@ export async function joinSeasonParticipantRemote(seasonId, userId) {
 }
 
 export async function startNewSeason(currentSeasonId) {
-  const sb = getClient();
+  const sb = await requireClient();
   const { data: cur } = await sb.from('seasons').select('rules').eq('id', currentSeasonId).single();
   const now = new Date().toISOString();
   await sb
@@ -256,6 +228,7 @@ export async function startNewSeason(currentSeasonId) {
 
 export function subscribeSeasonChanges(onChange) {
   const sb = getClient();
+  if (!sb) return () => {};
   if (!sb) return () => {};
   if (unsubscribe) unsubscribe();
 

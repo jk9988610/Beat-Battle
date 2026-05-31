@@ -1,4 +1,5 @@
 import {
+  initCloudAsync,
   getClient,
   uploadAudioToCloud,
   downloadAudioFromCloud,
@@ -30,6 +31,7 @@ function mapRow(row) {
 }
 
 export async function listPublishedWorks(userId) {
+  await initCloudAsync();
   const sb = getClient();
   if (!sb || !userId) return [];
   const { data, error } = await sb
@@ -42,6 +44,7 @@ export async function listPublishedWorks(userId) {
 }
 
 export async function publishWork({ userId, userName, title, audioBlob }) {
+  await initCloudAsync();
   const sb = getClient();
   if (!sb) throw new Error('云同步未配置');
   if (!userId || !userName?.trim()) throw new Error('请先登录');
@@ -87,6 +90,7 @@ export async function resolveWorkPreviewBlobUrl(work) {
  * 从制作库提交参赛：优先服务端复制，失败则直接引用已有 Storage 路径（避免平板下载再上传）
  */
 export async function createSubmissionFromPublished(seasonId, userId, work) {
+  await initCloudAsync();
   const sb = getClient();
   if (!sb) throw new Error('云同步未配置');
   const audioPath = work?.audioPath;

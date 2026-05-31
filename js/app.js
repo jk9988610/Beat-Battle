@@ -58,6 +58,7 @@ import {
 import {
   cloudActive,
   initCloud,
+  initCloudAsync,
   findOrCreateUser,
   createSubmission,
   createReview,
@@ -1087,7 +1088,7 @@ function initEarlyShell() {
   bindGlobalNav();
 }
 
-async function bootstrap() {
+export async function bootstrap() {
   stopLibraryPreview();
   const appEl = document.getElementById('app');
   if (appEl) appEl.innerHTML = '<div class="card empty-state"><p>加载中…</p></div>';
@@ -1109,8 +1110,9 @@ async function bootstrap() {
     state = loaded;
     ensureSeason(state, state.currentSeasonId);
     normalizeAllSeasons();
-    if (isCloudEnabled() && cloudActive()) {
-      subscribeSeasonChanges(scheduleCloudReload);
+    if (isCloudEnabled()) {
+      await initCloudAsync().catch((e) => console.warn("sdk", e));
+      if (cloudActive()) subscribeSeasonChanges(scheduleCloudReload);
     }
     safeRender();
 
@@ -1132,4 +1134,3 @@ async function bootstrap() {
 }
 
 
-window.addEventListener('load', bootstrap);
