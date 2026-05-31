@@ -27,10 +27,21 @@ import { saveSession, clearSession, loadSession, MUSIC_PROD_URL } from './sessio
 import {
   listPublishedWorks,
   createSubmissionFromPublished,
-  getWorkPublicPreviewUrl,
-  resolveWorkPreviewBlobUrl,
-  revokeWorkPreviewUrl,
 } from './published-works.js';
+import {
+  isLibraryPreviewLocked,
+  shouldDeferUiRefresh,
+  lockLibraryPreview,
+  unlockLibraryPreview,
+  setLibraryPreviewUnlockHandler,
+  bindLibraryPreviewLifecycle,
+  startLibraryPreview,
+  stopLibraryPreview,
+  markPendingUiRefresh,
+  markPendingCloudReload,
+  consumePendingCloudReload,
+  consumePendingUiRefresh,
+} from './library-preview.js';
 import {
   normalizeSeason,
   formatSeasonProgressHtml,
@@ -65,43 +76,6 @@ let autoProgressTimer = null;
 
 const $ = (sel) => document.querySelector(sel);
 
-let pendingRenderAfterPreview = false;
-
-function getLibraryPreviewPlayer() {
-  return document.getElementById('library-preview-player');
-}
-
-function isLibraryPreviewActive() {
-  const player = getLibraryPreviewPlayer();
-  if (!player || !player.src) return false;
-  return !player.paused || (player.currentTime > 0 && !player.ended);
-}
-
-function renderUnlessPreviewing() {
-  if (isLibraryPreviewActive()) {
-    pendingRenderAfterPreview = true;
-    return false;
-  }
-  render();
-  return true;
-}
-
-function bindLibraryPreviewEndHandler() {
-  const player = getLibraryPreviewPlayer();
-  if (!player || player.dataset.boundPreviewEnd) return;
-  player.dataset.boundPreviewEnd = '1';
-  player.addEventListener('pause', () => {
-    if (!isLibraryPreviewActive() && pendingRenderAfterPreview) {
-      pendingRenderAfterPreview = false;
-      render();
-    }
-  });
-  player.addEventListener('ended', () => {
-    pendingRenderAfterPreview = false;
-    render();
-  });
-}
-
 function normalizeAllSeasons() {
   if (!state?.seasons) return;
   for (const s of Object.values(state.seasons)) normalizeSeason(s);
@@ -125,6 +99,10 @@ function persist() {
 
 async function reloadFromCloud() {
   if (!isCloudEnabled()) return;
+  if (shouldDeferUiRefresh()) {
+    markPendingCloudReload();
+    return;
+  }
   state = await loadState();
   normalizeAllSeasons();
   await runAutoProgress();
@@ -134,7 +112,13 @@ async function reloadFromCloud() {
 
 function scheduleCloudReload() {
   clearTimeout(reloadTimer);
-  reloadTimer = setTimeout(() => reloadFromCloud(), 400);
+  reloadTimer = setTimeout(() => {
+    if (shouldDeferUiRefresh()) {
+      markPendingCloudReload();
+      return;
+    }
+    reloadFromCloud();
+  }, 400);
 }
 
 async function runAutoProgress() {
@@ -143,7 +127,8 @@ async function runAutoProgress() {
   normalizeSeason(season);
   const result = await maybeAutoProgressSeason(state, { saveState: persistStateOnly });
   if (result.changed) {
-    if (cloudActive()) await reloadFromCloud();
+    if (shouldDeferUiRefresh()) markPendingCloudReload();
+    else if (cloudActive()) await reloadFromCloud();
     else persistStateOnly();
     if (result.message) alert(result.message);
   }
@@ -151,8 +136,10 @@ async function runAutoProgress() {
 }
 
 function scheduleAutoProgress(delayMs = 300) {
+  if (shouldDeferUiRefresh()) return;
   clearTimeout(autoProgressTimer);
   autoProgressTimer = setTimeout(async () => {
+    if (shouldDeferUiRefresh()) return;
     try {
       const result = await runAutoProgress();
       if (result.changed) renderUnlessPreviewing();
@@ -773,35 +760,15 @@ function bindLibraryWorkDelegation() {
   if (previewBtn && getPage() === 'upload') {
       e.preventDefault();
       const work = publishedWorksCache.find((w) => w.id === previewBtn.dataset.workId);
-      const player = getLibraryPreviewPlayer();
-      const dock = document.getElementById('library-preview-dock');
-      if (!work || !player || !dock) {
+      if (!work) {
         alert('无法加载作品信息');
         return;
       }
       const prevLabel = previewBtn.textContent;
       previewBtn.disabled = true;
       previewBtn.textContent = '加载中…';
-      bindLibraryPreviewEndHandler();
       try {
-        const publicUrl = getWorkPublicPreviewUrl(work);
-        const playUrl = async (url) => {
-          dock.hidden = false;
-          player.src = url;
-          player.load();
-          await player.play();
-        };
-        if (publicUrl) {
-          try {
-            await playUrl(publicUrl);
-          } catch {
-            const blobUrl = await resolveWorkPreviewBlobUrl(work);
-            await playUrl(blobUrl);
-          }
-        } else {
-          const blobUrl = await resolveWorkPreviewBlobUrl(work);
-          await playUrl(blobUrl);
-        }
+        startLibraryPreview(work);
       } catch (err) {
         alert('试听失败：' + (err.message || err));
       } finally {
@@ -978,9 +945,9 @@ function bindPageEvents(page) {
   }
 
   if (page === 'upload') {
-    if (isCloudEnabled() && uploadMode === 'library') {
+    if (isCloudEnabled() && uploadMode === 'library' && !shouldDeferUiRefresh()) {
       refreshPublishedWorks().then(() => {
-        if (getPage() === 'upload') {
+        if (getPage() === 'upload' && !shouldDeferUiRefresh()) {
           updatePublishedListDom();
           renderUnlessPreviewing();
         }
@@ -1049,16 +1016,7 @@ function createFileList(file) {
 
 window.addEventListener('hashchange', () => {
   revokeAudioUrl();
-  if (!location.hash.includes('upload')) {
-    const dock = document.getElementById('library-preview-dock');
-    const player = getLibraryPreviewPlayer();
-    if (player) {
-      player.pause();
-      player.removeAttribute('src');
-    }
-    if (dock) dock.hidden = true;
-    revokeWorkPreviewUrl();
-  }
+  if (!location.hash.includes('upload')) stopLibraryPreview();
   renderUnlessPreviewing();
 });
 
@@ -1088,7 +1046,8 @@ async function bootstrap() {
   await loadVersionMeta();
   updateVersionUI();
   bindDebugCopy();
-  bindLibraryPreviewEndHandler();
+  bindLibraryPreviewLifecycle();
+  setLibraryPreviewUnlockHandler(flushPendingUiWork);
   bindLibraryWorkDelegation();
   initUpdateUI();
   bindGlobalNav();
